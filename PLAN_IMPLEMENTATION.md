@@ -113,7 +113,7 @@ Chaque jalon doit inclure code, documentation, tests et exemple pertinent ; il n
 
 ### J6 — Maillages et éléments supplémentaires
 
-**En cours :** les parcours Poisson-Dirichlet Q1 2D et P1 tétraédrique 3D expérimentaux sont implémentés avec exemples, tests géométriques et de convergence. Les conditions mixtes Dirichlet-Neumann sont également traitées sur tétraèdres. La validation sur Rust stable et MSRV en CI et les extensions (Neumann pur 3D, import et autres formulations) restent à faire.
+**En cours :** les parcours Poisson-Dirichlet Q1 2D et P1 tétraédrique 3D expérimentaux sont implémentés avec exemples, tests géométriques et de convergence. Les conditions mixtes et Neumann pur à moyenne intégrale nulle sont traités sur quadrilatères et tétraèdres. La validation sur Rust stable et MSRV en CI et les extensions (import et autres formulations) restent à faire.
 
 - Ajouter Q1 sur quadrilatères, puis tétraèdres P1 en 3D ; traiter explicitement l’ordre local, les orientations, les faces et les mappings non affines lorsque nécessaires.
 - Généraliser les interfaces seulement après identification des points communs et des différences ; conserver les tests de Poisson 2D.

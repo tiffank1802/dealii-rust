@@ -8,3 +8,6 @@
 /poisson_q1.vtk
 /poisson_3d.vtk
 /poisson_3d_mixed.vtk
+/poisson_3d_neumann.vtk
+/poisson_q1_mixed.vtk
+/poisson_q1_neumann.vtk

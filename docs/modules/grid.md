@@ -43,3 +43,5 @@ Le raffinement uniforme `UniformRefinement` conserve les indices des anciens som
 **Quadrilatères :** `quad::QuadMesh` valide cellules convexes orientées et topologie d’arêtes, mais ne détecte pas les intersections et nœuds pendants. Les API Gmsh et de raffinement triangulaires ne s’appliquent pas.
 
 **Tétraèdres :** `tetra::TetMesh` valide l’orientation, la non-dégénérescence et les faces partagées ; il fournit faces de bord orientées et normales sortantes. Les intersections, le raffinement et l’import Gmsh 3D restent hors périmètre.
+
+**Frontières Q1 :** `QuadMesh::boundary_edge_geometry` expose les arêtes dirigées selon les cellules et les normales sortantes ; les IDs restent propres à chaque maillage.

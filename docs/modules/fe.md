@@ -36,6 +36,6 @@ Les fichiers amont cités sont des repères fonctionnels représentatifs, pas un
 - `values` : pré-calculer points physiques, valeurs, gradients et `JxW` sans supposer que les gradients seront constants pour tous les futurs mappings. Vérifier tailles entre règle et résultats ; borner les indices.
 - **Tests ciblés :** identité et triangle transformé, partition de l’unité, gradients physiques exacts et intégrale de 1 égale à l’aire ; quadrature plus précise pour le membre droit non polynomial et les erreurs.
 
-**État Q1 partiel :** `quad` fournit formes, gradients, mapping bilinéaire au point et assemblage Poisson avec quadrature 3×3. Patch affine et convergence sur maillages déformés sont testés. Neumann et les coefficients elliptiques généraux sur Q1 ainsi que les champs vectoriels restent à faire.
+**État Q1 partiel :** `quad` fournit formes, gradients, mapping bilinéaire au point et assemblage Poisson avec quadrature 3×3. Patch affine et convergence sur maillages déformés sont testés. Les conditions mixtes et Neumann pur Q1 sont disponibles ; les coefficients elliptiques généraux et les champs vectoriels restent à faire.
 
-**État tétraèdre P1 :** `tetra` propose un mapping affine 3D avec orientation positive, des gradients constants et Poisson-Dirichlet avec quadrature de degré 5. Les conditions mixtes Dirichlet-Neumann sont disponibles ; Neumann pur 3D et les coefficients variables restent à faire.
+**État tétraèdre P1 :** `tetra` propose un mapping affine 3D avec orientation positive, des gradients constants et Poisson-Dirichlet avec quadrature de degré 5. Les conditions mixtes et Neumann pur sont disponibles ; les coefficients variables en 3D restent à faire.

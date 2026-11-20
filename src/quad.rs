@@ -9,9 +9,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Write};
 
 use crate::base::Point2;
-use crate::grid::{CellId, VertexId};
+use crate::grid::{BoundaryEdgeGeometry, BoundaryEdgeId, CellId, VertexId};
 use crate::lac::{CooBuilder, CsrMatrix};
-use crate::quadrature::square_degree_5;
+use crate::quadrature::{line_degree_5, square_degree_5};
 use crate::{error, Result};
 
 /// Q1 shape values in counterclockwise reference vertex order.
@@ -130,6 +130,7 @@ pub struct QuadMesh {
     vertices: Vec<Point2>,
     cells: Vec<[VertexId; 4]>,
     boundary_edges: Vec<[VertexId; 2]>,
+    oriented_boundary_edges: Vec<[VertexId; 2]>,
     boundary_vertices: Vec<VertexId>,
 }
 impl QuadMesh {
@@ -192,6 +193,11 @@ impl QuadMesh {
             .filter(|(_, (count, _))| *count == 1)
             .map(|(&(a, b), _)| [a, b])
             .collect();
+        let oriented_boundary_edges = edges
+            .values()
+            .filter(|(count, _)| *count == 1)
+            .map(|(_, vertices)| *vertices)
+            .collect();
         let boundary_vertices = boundary_edges
             .iter()
             .flat_map(|edge| edge.iter().copied())
@@ -202,6 +208,7 @@ impl QuadMesh {
             vertices,
             cells,
             boundary_edges,
+            oriented_boundary_edges,
             boundary_vertices,
         })
     }
@@ -251,6 +258,27 @@ impl QuadMesh {
     /// Boundary edges in canonical endpoint order, not an orientation.
     pub fn boundary_edges(&self) -> &[[VertexId; 2]] {
         &self.boundary_edges
+    }
+    /// Directed edge as in its counterclockwise cell, with right-hand
+    /// outward normal. The ID is valid only for this quadrilateral mesh.
+    pub fn boundary_edge_geometry(&self, id: BoundaryEdgeId) -> Result<BoundaryEdgeGeometry> {
+        let vertices = *self
+            .oriented_boundary_edges
+            .get(id.0)
+            .ok_or_else(|| error("boundary edge index out of bounds"))?;
+        let points = [self.vertices[vertices[0].0], self.vertices[vertices[1].0]];
+        let dx = points[1].x - points[0].x;
+        let dy = points[1].y - points[0].y;
+        let length = dx.hypot(dy);
+        if !length.is_finite() || length <= 0.0 {
+            return Err(error("invalid boundary edge length"));
+        }
+        Ok(BoundaryEdgeGeometry {
+            vertices,
+            points,
+            outward_normal: [dy / length, -dx / length],
+            length,
+        })
     }
     pub fn boundary_vertices(&self) -> &[VertexId] {
         &self.boundary_vertices
@@ -410,4 +438,85 @@ pub fn write_vtk<W: Write>(mut out: W, mesh: &QuadMesh, values: &[f64]) -> io::R
         writeln!(out, "{}", v)?;
     }
     Ok(())
+}
+
+/// Interpolate Dirichlet data on selected boundary edges. Returns sorted,
+/// deduplicated `(vertex index, value)` constraints for `with_dirichlet`.
+/// Edge IDs must belong to this mesh, be unique and in bounds. Nonfinite
+/// function values are rejected; a shared vertex is sampled once.
+pub fn interpolate_boundary<F: Fn(Point2) -> f64>(
+    mesh: &QuadMesh,
+    edges: &[BoundaryEdgeId],
+    value: F,
+) -> Result<Vec<(usize, f64)>> {
+    let mut seen = BTreeSet::new();
+    let mut vertices = BTreeSet::new();
+    for &id in edges {
+        if !seen.insert(id) {
+            return Err(error("duplicate boundary edge"));
+        }
+        let edge = mesh
+            .boundary_edges
+            .get(id.0)
+            .ok_or_else(|| error("boundary edge index out of bounds"))?;
+        vertices.extend(edge.iter().copied());
+    }
+    vertices
+        .into_iter()
+        .map(|v| {
+            let result = value(mesh.vertices[v.0]);
+            if !result.is_finite() {
+                Err(error("boundary function returned a nonfinite value"))
+            } else {
+                Ok((v.0, result))
+            }
+        })
+        .collect()
+}
+
+/// Assemble `∫g φ_i ds` on selected Q1 boundary edges for `-Δu=f`.
+/// The callback receives the physical point and the unit **outward** normal;
+/// it supplies `g=∂u/∂n`. Add this load before Dirichlet elimination.
+/// Edge IDs must belong to this mesh, be unique and in bounds. Boundary
+/// edges of a bilinear quadrilateral are straight and the Q1 trace is linear;
+/// the degree-five Gauss rule is exact for polynomial fluxes through degree 4
+/// (up to rounding). Nonfinite flux or accumulated loads are rejected.
+/// Pure Neumann systems require compatibility and normalization; this routine
+/// assembles only the load and does not solve the singular system.
+pub fn assemble_neumann<F>(mesh: &QuadMesh, edges: &[BoundaryEdgeId], flux: F) -> Result<Vec<f64>>
+where
+    F: Fn(Point2, [f64; 2]) -> f64,
+{
+    let mut seen = BTreeSet::new();
+    for &id in edges {
+        if !seen.insert(id) {
+            return Err(error("duplicate Neumann boundary edge"));
+        }
+        mesh.boundary_edge_geometry(id)?;
+    }
+    let mut load = vec![0.0; mesh.vertices.len()];
+    for &id in edges {
+        let edge = mesh.boundary_edge_geometry(id)?;
+        for q in line_degree_5() {
+            let t = q.point;
+            let p = Point2::new(
+                (1.0 - t) * edge.points[0].x + t * edge.points[1].x,
+                (1.0 - t) * edge.points[0].y + t * edge.points[1].y,
+            )?;
+            let g = flux(p, edge.outward_normal);
+            if !g.is_finite() {
+                return Err(error("Neumann flux returned a nonfinite value"));
+            }
+            let weight = edge.length * q.weight;
+            if !weight.is_finite() || weight <= 0.0 {
+                return Err(error("invalid boundary quadrature weight"));
+            }
+            load[edge.vertices[0].0] += g * (1.0 - t) * weight;
+            load[edge.vertices[1].0] += g * t * weight;
+        }
+    }
+    if load.iter().any(|x| !x.is_finite()) {
+        return Err(error("nonfinite Neumann load"));
+    }
+    Ok(load)
 }

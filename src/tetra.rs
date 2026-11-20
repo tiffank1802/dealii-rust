@@ -515,8 +515,8 @@ pub fn interpolate_boundary<F: Fn(Point3) -> f64>(
 /// The P1 face basis and flux use a degree-five triangle rule. The integral is
 /// exact for polynomial fluxes of degree ≤ 4, apart from floating-point error.
 /// This is only a load assembly routine: pure Neumann problems remain singular
-/// and require compatibility and normalization, neither of which is supplied
-/// by the 3D API. Use CG only once the system is positive definite.
+/// and require compatibility and normalization. Use [`crate::neumann3d::solve`]
+/// for full-boundary Neumann Poisson, or CG only once the system is positive definite.
 pub fn assemble_neumann<F>(mesh: &TetMesh, faces: &[BoundaryFaceId], flux: F) -> Result<Vec<f64>>
 where
     F: Fn(Point3, [f64; 3]) -> f64,

@@ -43,4 +43,6 @@ Les fichiers amont cités sont des repères fonctionnels représentatifs, pas un
 
 **Diffusion-réaction :** `elliptic::assemble` accepte des coefficients dépendant de la cellule, et réutilise `numerics::assemble_neumann` pour le flux conormal. Voir le README pour les limites de quadrature, de coercivité et du solveur Neumann pur.
 
-**Conditions mixtes 3D :** `tetra::assemble_neumann` intègre le flux sur les faces triangulaires orientées et `tetra::interpolate_boundary` construit les valeurs de Dirichlet. Le solveur Neumann pur existant reste limité aux triangles 2D.
+**Conditions mixtes 3D :** `tetra::assemble_neumann` intègre le flux sur les faces triangulaires orientées et `tetra::interpolate_boundary` construit les valeurs de Dirichlet. `neumann3d::solve` traite le Neumann pur tétraédrique avec contrôle par composante et normalisation intégrale.
+
+**Conditions mixtes Q1 :** `quad::assemble_neumann` intègre le flux et `quad::interpolate_boundary` produit les valeurs de Dirichlet. `neumann_quad::solve` traite le Neumann pur Q1, avec contrôle de compatibilité par composante et moyenne intégrale calculée à partir des poids Q1.
