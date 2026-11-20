@@ -38,4 +38,4 @@ Les fichiers amont cités sont des repères fonctionnels représentatifs, pas un
 
 **État Q1 partiel :** `quad` fournit formes, gradients, mapping bilinéaire au point et assemblage Poisson avec quadrature 3×3. Patch affine et convergence sur maillages déformés sont testés. Neumann et les coefficients elliptiques généraux sur Q1 ainsi que les champs vectoriels restent à faire.
 
-**État tétraèdre P1 :** `tetra` propose un mapping affine 3D avec orientation positive, des gradients constants et Poisson-Dirichlet avec quadrature de degré 5. Les problèmes Neumann 3D et coefficients variables restent à faire.
+**État tétraèdre P1 :** `tetra` propose un mapping affine 3D avec orientation positive, des gradients constants et Poisson-Dirichlet avec quadrature de degré 5. Les conditions mixtes Dirichlet-Neumann sont disponibles ; Neumann pur 3D et les coefficients variables restent à faire.

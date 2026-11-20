@@ -5,7 +5,7 @@
 use crate::base::Point3;
 use crate::grid::{CellId, VertexId};
 use crate::lac::{CooBuilder, CsrMatrix};
-use crate::quadrature::tetra_degree_5;
+use crate::quadrature::{tetra_degree_5, triangle_degree_5};
 use crate::{error, Result};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Write};
@@ -469,4 +469,95 @@ pub fn write_vtk<W: Write>(mut out: W, mesh: &TetMesh, values: &[f64]) -> io::Re
         writeln!(out, "{}", v)?;
     }
     Ok(())
+}
+
+/// Interpolate Dirichlet data on selected triangular boundary faces. Returns
+/// sorted `(vertex index, value)` constraints for `CsrMatrix::with_dirichlet`;
+/// vertices shared by faces are sampled once. Face IDs must belong to this
+/// mesh, be in bounds and be unique. Nonfinite function values are rejected.
+pub fn interpolate_boundary<F: Fn(Point3) -> f64>(
+    mesh: &TetMesh,
+    faces: &[BoundaryFaceId],
+    value: F,
+) -> Result<Vec<(usize, f64)>> {
+    let mut seen = BTreeSet::new();
+    let mut vertices = BTreeSet::new();
+    for &id in faces {
+        if !seen.insert(id) {
+            return Err(error("duplicate boundary face"));
+        }
+        let face = mesh
+            .boundary_faces
+            .get(id.0)
+            .ok_or_else(|| error("boundary face index out of bounds"))?;
+        vertices.extend(face.iter().copied());
+    }
+    vertices
+        .into_iter()
+        .map(|v| {
+            let result = value(mesh.vertices[v.0]);
+            if !result.is_finite() {
+                Err(error("boundary function returned a nonfinite value"))
+            } else {
+                Ok((v.0, result))
+            }
+        })
+        .collect()
+}
+
+/// Assemble `∫ g φ_i dS` over selected tetrahedral boundary faces.
+/// For `-Δu=f`, the callback receives the physical point and the unit
+/// **outward** normal and must return `g = ∂u/∂n`. Its contribution is added
+/// to the volume right-hand side before Dirichlet elimination. Face IDs must
+/// belong to this mesh, be in bounds and be unique. Nonfinite values and
+/// nonrepresentable results are rejected.
+///
+/// The P1 face basis and flux use a degree-five triangle rule. The integral is
+/// exact for polynomial fluxes of degree ≤ 4, apart from floating-point error.
+/// This is only a load assembly routine: pure Neumann problems remain singular
+/// and require compatibility and normalization, neither of which is supplied
+/// by the 3D API. Use CG only once the system is positive definite.
+pub fn assemble_neumann<F>(mesh: &TetMesh, faces: &[BoundaryFaceId], flux: F) -> Result<Vec<f64>>
+where
+    F: Fn(Point3, [f64; 3]) -> f64,
+{
+    let mut seen = BTreeSet::new();
+    for &id in faces {
+        if !seen.insert(id) {
+            return Err(error("duplicate Neumann boundary face"));
+        }
+        mesh.boundary_face_geometry(id)?;
+    }
+    let quadrature = triangle_degree_5();
+    let mut load = vec![0.0; mesh.vertices.len()];
+    for &id in faces {
+        let face = mesh.boundary_face_geometry(id)?;
+        let [a, b, c] = face.points;
+        let e1 = sub(b, a);
+        let e2 = sub(c, a);
+        let jacobian = 2.0 * face.area;
+        for q in &quadrature {
+            let p = Point3::new(
+                a.x + q.point.x * e1[0] + q.point.y * e2[0],
+                a.y + q.point.x * e1[1] + q.point.y * e2[1],
+                a.z + q.point.x * e1[2] + q.point.y * e2[2],
+            )?;
+            let g = flux(p, face.outward_normal);
+            if !g.is_finite() {
+                return Err(error("Neumann flux returned a nonfinite value"));
+            }
+            let weight = jacobian * q.weight;
+            if !weight.is_finite() || weight <= 0.0 {
+                return Err(error("invalid boundary quadrature weight"));
+            }
+            let shape = crate::fe::shape_values(q.point);
+            for i in 0..3 {
+                load[face.vertices[i].0] += g * shape[i] * weight;
+            }
+        }
+    }
+    if load.iter().any(|x| !x.is_finite()) {
+        return Err(error("nonfinite Neumann load"));
+    }
+    Ok(load)
 }

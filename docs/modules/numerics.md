@@ -42,3 +42,5 @@ Les fichiers amont cités sont des repères fonctionnels représentatifs, pas un
 **État P1 partiel :** `field` propose l’interpolation nodale et de bord, la masse consistante, la projection L2 via CG et la recherche/évaluation ponctuelle par balayage. Les tolérances, la quadrature et les limites de classification sont détaillées dans le README ; champs vectoriels, spatialisation et formulation générale restent à faire.
 
 **Diffusion-réaction :** `elliptic::assemble` accepte des coefficients dépendant de la cellule, et réutilise `numerics::assemble_neumann` pour le flux conormal. Voir le README pour les limites de quadrature, de coercivité et du solveur Neumann pur.
+
+**Conditions mixtes 3D :** `tetra::assemble_neumann` intègre le flux sur les faces triangulaires orientées et `tetra::interpolate_boundary` construit les valeurs de Dirichlet. Le solveur Neumann pur existant reste limité aux triangles 2D.

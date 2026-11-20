@@ -35,7 +35,17 @@ Cet exemple résout `−Δu = 3π²u` sur le cube unité avec Dirichlet homogèn
 
 Les tétraèdres utilisent les sommets de référence `(0,0,0), (1,0,0), (0,1,0), (0,0,1)` et un mapping affine d’orientation positive. Un déterminant inférieur ou égal à `64 ε` fois le cube de la longueur de la plus grande arête est rejeté. Les faces partagées doivent avoir des orientations opposées ; les faces de frontière sont orientées vers l’extérieur et leurs normales et aires sont accessibles. Comme pour les maillages 2D, les intersections, recouvrements et nœuds pendants ne sont pas détectés : la conformité géométrique reste une précondition.
 
-La source et les erreurs utilisent une quadrature Gauss-Duffy à 64 points, exacte pour les polynômes de degré total ≤ 5 sur le tétraèdre de référence, à l’arrondi près. Les tests vérifient les monômes, la matrice locale analytique, les normales, un patch affine et la convergence L2/H1. Ce premier parcours 3D est limité à Poisson scalaire avec Dirichlet : les conditions de Neumann, la diffusion-réaction, l’import Gmsh 3D et le raffinement des tétraèdres ne sont pas implémentés.
+La source et les erreurs utilisent une quadrature Gauss-Duffy à 64 points, exacte pour les polynômes de degré total ≤ 5 sur le tétraèdre de référence, à l’arrondi près. Les tests vérifient les monômes, la matrice locale analytique, les normales, un patch affine et la convergence L2/H1. Ce parcours 3D est limité à Poisson scalaire avec Dirichlet et Neumann mixtes ; le solveur Neumann pur 3D, la diffusion-réaction, l’import Gmsh 3D et le raffinement des tétraèdres ne sont pas implémentés.
+
+### Conditions mixtes sur tétraèdres
+
+```sh
+cargo run --example poisson_3d_mixed -- 8
+```
+
+L’exemple utilise `u = 1 + x + x² + 2y + y² + 3z + z²`, avec Dirichlet sur `x = 0` et le flux sortant `g = ∂u/∂n` sur les autres faces. La sélection par coordonnées est propre au cube structuré ; il n’y a pas encore de marqueurs Gmsh 3D. `tetra::interpolate_boundary` déduplique les sommets des faces de Dirichlet ; `tetra::assemble_neumann` intègre `∫g φᵢ dS` sur des `BoundaryFaceId` uniques, avec une quadrature triangulaire de degré 5. Le vecteur obtenu doit être ajouté à la charge volumique **avant** l’élimination de Dirichlet. Les IDs invalides ou répétés et les données non finies sont rejetés.
+
+L’assemblage de charge seul ne résout pas le cas Neumann pur : la matrice de diffusion possède un noyau constant par composante et exige compatibilité et normalisation. Le solveur `neumann::solve` existant est limité aux triangles 2D ; ne pas utiliser directement CG sur la matrice 3D singulière.
 
 ## Conditions aux limites mixtes
 
@@ -113,9 +123,9 @@ L’exemple résout successivement le problème Poisson homogène sur quatre niv
 ## Périmètre et validation
 
 - Implémentés : points 2D/3D, triangles et tétraèdres P1, quadrilatères Q1, maillages structurés, mappings affine et bilinéaire, quadratures, assemblage Poisson et diffusion-réaction anisotrope P1, Dirichlet, Neumann mixte ou pur normalisé, COO/CSR, CG, export VTK, import d’un sous-ensemble Gmsh 4.1 ASCII, raffinement uniforme, indicateur résiduel Poisson limité et opérations sur champs P1.
-- Limités au calcul séquentiel scalaire ; pas encore de raffinement local adaptatif, MPI, Trilinos, autres familles d’éléments que P1/Q1 ou prise en charge complète de Gmsh. Le parcours 3D est restreint aux tétraèdres P1 avec Dirichlet. La validation de `Mesh2::new` ne détecte pas les intersections géométriques ni tous les cas non conformes : le maillage fourni doit être conforme.
+- Limités au calcul séquentiel scalaire ; pas encore de raffinement local adaptatif, MPI, Trilinos, autres familles d’éléments que P1/Q1 ou prise en charge complète de Gmsh. Le parcours 3D est restreint à Poisson sur tétraèdres P1 avec Dirichlet ou conditions mixtes ; Neumann pur 3D reste à réaliser. La validation de `Mesh2::new` ne détecte pas les intersections géométriques ni tous les cas non conformes : le maillage fourni doit être conforme.
 - Aucune dépendance Cargo externe. Rust 1.70 est la version minimale **cible**, configurée dans la CI avec la version stable ; ces deux configurations restent à confirmer par leur exécution en CI.
-- Les tests couvrent les matrices locales et globales, les coefficients elliptiques et données invalides, le solveur, les normales, les conditions mixtes et de Neumann pur, l’import et les marqueurs Gmsh, le raffinement et le transfert P1, les indicateurs analytiques, l’interpolation, la projection et l’évaluation ponctuelle, les mappings et patch tests Q1 et tétraédriques, ainsi que la convergence des solutions manufacturées. Le fichier VTK a aussi été lu avec `meshio` lors d’une vérification locale.
+- Les tests couvrent les matrices locales et globales, les coefficients elliptiques et données invalides, le solveur, les normales, les conditions mixtes 2D/3D et de Neumann pur 2D, l’import et les marqueurs Gmsh, le raffinement et le transfert P1, les indicateurs analytiques, l’interpolation, la projection et l’évaluation ponctuelle, les mappings et patch tests Q1 et tétraédriques, ainsi que la convergence des solutions manufacturées. Le fichier VTK a aussi été lu avec `meshio` lors d’une vérification locale.
 
 ## Documentation et plans
 
