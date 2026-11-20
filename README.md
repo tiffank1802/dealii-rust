@@ -15,6 +15,28 @@ L’argument facultatif est le nombre de subdivisions par côté (16 par défaut
 
 Le gradient conjugué démarre à zéro et utilise par défaut `max(1e-12, 1e-10 × ||b||)` comme seuil de norme du résidu, avec 10 000 itérations au maximum. La matrice doit être symétrique définie positive ; une rupture ou une non-convergence est signalée par une erreur. Le résidu annoncé est recalculé à partir de `b − Ax`.
 
+## Poisson sur quadrilatères Q1
+
+```sh
+cargo run --example poisson_q1 -- 16
+```
+
+Ce second parcours résout le même problème manufacturé sur un maillage de quadrilatères Q1, et écrit `poisson_q1.vtk` (VTK Legacy ASCII, cellules de type quadrilatère). `quad::QuadMesh` et `quad::BilinearMap` sont séparés de l’API triangulaire ; les IDs de sommets et cellules ne doivent pas être échangés entre maillages. Chaque cellule est ordonnée dans le sens antihoraire selon les sommets de référence `(0,0), (1,0), (1,1), (0,1)`. Le mapping isoparamétrique est bilinéaire et le Jacobien est évalué à chaque point. Les quadrilatères non convexes, inversés ou dégénérés sont rejetés ; le déterminant aux quatre coins doit dépasser `64 ε` fois le carré de la plus grande arête. Les intersections, recouvrements et nœuds pendants entre cellules ne sont pas détectés : le maillage fourni doit être conforme.
+
+L’assemblage et les erreurs utilisent la règle de Gauss tensorisée 3×3, exacte sur le carré de référence jusqu’au degré 5 **dans chaque coordonnée**. Pour un mapping non affine, l’intégrande de rigidité est généralement rationnel et l’intégration est approchée. Les tests comprennent un patch affine sur maillage déformé, des matrices analytiques et la convergence sur grilles régulières et déformées. Pour ce premier parcours Q1, seuls les termes volumiques de Poisson et Dirichlet sont pris en charge : les API triangulaires de Neumann, diffusion-réaction, import Gmsh, raffinements et indicateurs ne s’appliquent pas aux quadrilatères. Les tétraèdres 3D disposent d’un parcours séparé, décrit ci-dessous.
+
+## Poisson P1 sur tétraèdres 3D
+
+```sh
+cargo run --example poisson_3d -- 8
+```
+
+Cet exemple résout `−Δu = 3π²u` sur le cube unité avec Dirichlet homogène et `u = sin(πx)sin(πy)sin(πz)`. `tetra::TetMesh::unit_cube` découpe chaque cube en six tétraèdres conformes ; `tetra::assemble_poisson` assemble le système P1 et `tetra::write_vtk` écrit `poisson_3d.vtk` (cellules VTK de type tétraèdre). L’API est distincte des maillages 2D ; les IDs sont propres à chaque maillage.
+
+Les tétraèdres utilisent les sommets de référence `(0,0,0), (1,0,0), (0,1,0), (0,0,1)` et un mapping affine d’orientation positive. Un déterminant inférieur ou égal à `64 ε` fois le cube de la longueur de la plus grande arête est rejeté. Les faces partagées doivent avoir des orientations opposées ; les faces de frontière sont orientées vers l’extérieur et leurs normales et aires sont accessibles. Comme pour les maillages 2D, les intersections, recouvrements et nœuds pendants ne sont pas détectés : la conformité géométrique reste une précondition.
+
+La source et les erreurs utilisent une quadrature Gauss-Duffy à 64 points, exacte pour les polynômes de degré total ≤ 5 sur le tétraèdre de référence, à l’arrondi près. Les tests vérifient les monômes, la matrice locale analytique, les normales, un patch affine et la convergence L2/H1. Ce premier parcours 3D est limité à Poisson scalaire avec Dirichlet : les conditions de Neumann, la diffusion-réaction, l’import Gmsh 3D et le raffinement des tétraèdres ne sont pas implémentés.
+
 ## Conditions aux limites mixtes
 
 ```sh
@@ -90,10 +112,10 @@ L’exemple résout successivement le problème Poisson homogène sur quatre niv
 
 ## Périmètre et validation
 
-- Implémentés : points et triangles 2D, maillage structuré, DoFs P1 par sommet, mapping affine, quadratures, assemblage Poisson et diffusion-réaction anisotrope P1, Dirichlet, Neumann mixte ou pur normalisé, COO/CSR, CG, export VTK, import d’un sous-ensemble Gmsh 4.1 ASCII, raffinement uniforme, indicateur résiduel Poisson limité et opérations sur champs P1.
-- Limités au calcul séquentiel scalaire ; pas encore de 3D, raffinement local adaptatif, MPI, Trilinos, autres familles d’éléments ou prise en charge complète de Gmsh. La validation de `Mesh2::new` ne détecte pas les intersections géométriques ni tous les cas non conformes : le maillage fourni doit être conforme.
+- Implémentés : points 2D/3D, triangles et tétraèdres P1, quadrilatères Q1, maillages structurés, mappings affine et bilinéaire, quadratures, assemblage Poisson et diffusion-réaction anisotrope P1, Dirichlet, Neumann mixte ou pur normalisé, COO/CSR, CG, export VTK, import d’un sous-ensemble Gmsh 4.1 ASCII, raffinement uniforme, indicateur résiduel Poisson limité et opérations sur champs P1.
+- Limités au calcul séquentiel scalaire ; pas encore de raffinement local adaptatif, MPI, Trilinos, autres familles d’éléments que P1/Q1 ou prise en charge complète de Gmsh. Le parcours 3D est restreint aux tétraèdres P1 avec Dirichlet. La validation de `Mesh2::new` ne détecte pas les intersections géométriques ni tous les cas non conformes : le maillage fourni doit être conforme.
 - Aucune dépendance Cargo externe. Rust 1.70 est la version minimale **cible**, configurée dans la CI avec la version stable ; ces deux configurations restent à confirmer par leur exécution en CI.
-- Les tests couvrent les matrices locales et globales, les coefficients elliptiques et données invalides, le solveur, les normales, les conditions mixtes et de Neumann pur, l’import et les marqueurs Gmsh, le raffinement et le transfert P1, les indicateurs analytiques, l’interpolation, la projection et l’évaluation ponctuelle, ainsi que la convergence des solutions manufacturées. Le fichier VTK a aussi été lu avec `meshio` lors d’une vérification locale.
+- Les tests couvrent les matrices locales et globales, les coefficients elliptiques et données invalides, le solveur, les normales, les conditions mixtes et de Neumann pur, l’import et les marqueurs Gmsh, le raffinement et le transfert P1, les indicateurs analytiques, l’interpolation, la projection et l’évaluation ponctuelle, les mappings et patch tests Q1 et tétraédriques, ainsi que la convergence des solutions manufacturées. Le fichier VTK a aussi été lu avec `meshio` lors d’une vérification locale.
 
 ## Documentation et plans
 

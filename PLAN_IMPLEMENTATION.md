@@ -42,8 +42,8 @@ Commencer par **une seule crate bibliothèque** organisée en modules ; extraire
 | --- | --- | --- |
 | `base` | Points/vecteurs géométriques, identifiants typés, erreurs et conventions numériques | Dimensions génériques et utilitaires supplémentaires |
 | `grid` | Sommets, triangles, connectivité, frontières, génération du carré unité, validation | Voisins, faces, import, 3D, hiérarchie de raffinement |
-| `quadrature` | Points et poids sur triangle de référence, règles et degré d’exactitude documentés | Règles tensorisées, autres cellules |
-| `fe` | P1 de référence, valeurs et gradients, mapping affine et Jacobien, équivalent minimal de `FEValues` | Q1, ordre supérieur, transformations H(div)/H(curl) |
+| `quadrature` | Règles sur triangle, carré et tétraèdre de référence, degrés d’exactitude documentés | Autres cellules et règles |
+| `fe` / `quad` / `tetra` | P1 sur triangles et tétraèdres, Q1 sur quadrilatères, valeurs, gradients et mappings | Ordre supérieur, autres cellules 3D et transformations H(div)/H(curl) |
 | `dofs` | Numérotation globale P1 conforme par sommet, indices locaux → globaux | Éléments vectoriels, orientations, contraintes et renumérotation |
 | `lac` | Triplets COO, compression CSR, produit matrice-vecteur, CG et diagnostic | Backends externes, préconditionneurs et autres solveurs |
 | `integrators` / `elliptic` | Intégration locale et assemblage P1 de diffusion-réaction symétrique | Advection, systèmes vectoriels et autres intégrateurs |
@@ -112,6 +112,8 @@ Chaque jalon doit inclure code, documentation, tests et exemple pertinent ; il n
 - **Terminé si** des exemples reproductibles et des tests de non-régression couvrent les cas annoncés.
 
 ### J6 — Maillages et éléments supplémentaires
+
+**En cours :** les parcours Poisson-Dirichlet Q1 2D et P1 tétraédrique 3D expérimentaux sont implémentés avec exemples, tests géométriques et de convergence. La validation sur Rust stable et MSRV en CI et les extensions (Neumann 3D, import et autres formulations) restent à faire.
 
 - Ajouter Q1 sur quadrilatères, puis tétraèdres P1 en 3D ; traiter explicitement l’ordre local, les orientations, les faces et les mappings non affines lorsque nécessaires.
 - Généraliser les interfaces seulement après identification des points communs et des différences ; conserver les tests de Poisson 2D.

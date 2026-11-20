@@ -1,6 +1,6 @@
 //! Small, safe finite-element building blocks inspired by deal.II.
 //!
-//! The current scope is serial, scalar P1 elements on conforming 2D triangles.
+//! The current scope is serial, scalar P1 triangles and tetrahedra and Q1 quadrilaterals.
 //! It is not yet a replacement for deal.II.
 #![forbid(unsafe_code)]
 
@@ -16,7 +16,9 @@ pub mod integrators;
 pub mod lac;
 pub mod neumann;
 pub mod numerics;
+pub mod quad;
 pub mod quadrature;
+pub mod tetra;
 pub mod vtk;
 
 /// An invalid input or numerical failure.

@@ -1,4 +1,4 @@
-//! Two-dimensional geometry.
+//! Two- and three-dimensional geometry.
 
 use crate::{error, Result};
 
@@ -40,4 +40,21 @@ pub fn triangle_determinant(points: [Point2; 3]) -> Result<f64> {
         return Err(error("triangle must be counterclockwise and nondegenerate"));
     }
     Ok(det)
+}
+
+/// A point in three-dimensional physical or reference coordinates.
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct Point3 {
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+}
+impl Point3 {
+    /// Construct a point with finite coordinates.
+    pub fn new(x: f64, y: f64, z: f64) -> Result<Self> {
+        if !x.is_finite() || !y.is_finite() || !z.is_finite() {
+            return Err(error("point coordinates must be finite"));
+        }
+        Ok(Self { x, y, z })
+    }
 }

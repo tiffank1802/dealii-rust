@@ -19,6 +19,8 @@ jobs:
       - run: cargo test --doc
       - run: cargo doc --no-deps
       - run: cargo run --example poisson_2d -- 8
+      - run: cargo run --example poisson_q1 -- 8
+      - run: cargo run --example poisson_3d -- 4
       - run: cargo run --example poisson_mixed -- 8
       - run: cargo run --example poisson_neumann -- 8
       - run: cargo run --example poisson_gmsh

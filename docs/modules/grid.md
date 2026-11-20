@@ -2,7 +2,7 @@
 
 [Index des fiches](README.md) · [Plan global](../PLAN_MODULES_DEALII.md) · [En-têtes amont](https://github.com/dealii/dealii/tree/1d230ad0be5ab2a3913cf4de8187301430721ed5/include/deal.II/grid)
 
-**Statut :** maillage triangulaire expérimental, avec géométrie et normales des arêtes de frontière et raffinement uniforme à un niveau ; voir le [README](../../README.md). Les autres extensions et noms ci-dessous restent des propositions.
+**Statut :** maillage triangulaire expérimental avec normales et raffinement uniforme, et maillages distincts de quadrilatères Q1 et tétraèdres P1 ; voir le [README](../../README.md). Les autres extensions et noms ci-dessous restent des propositions.
 
 ## Relations et contrats
 
@@ -39,3 +39,7 @@ Les fichiers amont cités sont des repères fonctionnels représentatifs, pas un
 **État :** les groupes physiques du sous-ensemble Gmsh importé sont conservés dans `gmsh::ImportedMesh`, pas dans `Mesh2` ; voir le [README](../../README.md#import-gmsh-et-résolution-sur-maillage-étiqueté). Les marqueurs généraux modifiables restent à concevoir.
 
 Le raffinement uniforme `UniformRefinement` conserve les indices des anciens sommets, expose les parents des cellules et arêtes de frontière et permet le prolongement P1. Les marqueurs ne sont pas propagés automatiquement. Pas de raffinement local, déraffinement ou hiérarchie persistante.
+
+**Quadrilatères :** `quad::QuadMesh` valide cellules convexes orientées et topologie d’arêtes, mais ne détecte pas les intersections et nœuds pendants. Les API Gmsh et de raffinement triangulaires ne s’appliquent pas.
+
+**Tétraèdres :** `tetra::TetMesh` valide l’orientation, la non-dégénérescence et les faces partagées ; il fournit faces de bord orientées et normales sortantes. Les intersections, le raffinement et l’import Gmsh 3D restent hors périmètre.

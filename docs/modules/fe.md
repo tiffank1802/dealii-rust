@@ -2,7 +2,7 @@
 
 [Index des fiches](README.md) · [Plan global](../PLAN_MODULES_DEALII.md) · [En-têtes amont](https://github.com/dealii/dealii/tree/1d230ad0be5ab2a3913cf4de8187301430721ed5/include/deal.II/fe)
 
-**Statut :** première implémentation P0 partielle et expérimentale ; voir le [README](../../README.md) pour le périmètre et la validation. Les extensions et noms ci-dessous restent des propositions.
+**Statut :** P1 triangulaire et tétraédrique et premier parcours Q1 quadrilatère expérimentaux ; voir le [README](../../README.md) pour le périmètre et la validation. Les extensions et noms ci-dessous restent des propositions.
 
 ## Relations et contrats
 
@@ -35,3 +35,7 @@ Les fichiers amont cités sont des repères fonctionnels représentatifs, pas un
 - `mapping::AffineTriangle` : `x=x₀+Jξ`, colonnes de `J` égales à `x₁−x₀` et `x₂−x₀`. Pour chaque point, calculer `J⁻ᵀ∇φ` et `JxW=|det J|w`; refuser Jacobien non valide selon la politique de `grid`.
 - `values` : pré-calculer points physiques, valeurs, gradients et `JxW` sans supposer que les gradients seront constants pour tous les futurs mappings. Vérifier tailles entre règle et résultats ; borner les indices.
 - **Tests ciblés :** identité et triangle transformé, partition de l’unité, gradients physiques exacts et intégrale de 1 égale à l’aire ; quadrature plus précise pour le membre droit non polynomial et les erreurs.
+
+**État Q1 partiel :** `quad` fournit formes, gradients, mapping bilinéaire au point et assemblage Poisson avec quadrature 3×3. Patch affine et convergence sur maillages déformés sont testés. Neumann et les coefficients elliptiques généraux sur Q1 ainsi que les champs vectoriels restent à faire.
+
+**État tétraèdre P1 :** `tetra` propose un mapping affine 3D avec orientation positive, des gradients constants et Poisson-Dirichlet avec quadrature de degré 5. Les problèmes Neumann 3D et coefficients variables restent à faire.
