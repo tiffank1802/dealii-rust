@@ -1,0 +1,7 @@
+/.cache/
+/target/
+/poisson_2d.vtk
+/poisson_mixed.vtk
+/poisson_neumann.vtk
+/poisson_gmsh.vtk
+/elliptic_mixed.vtk
