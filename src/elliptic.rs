@@ -17,7 +17,8 @@ use crate::{error, Error, Result};
 /// CG, together with suitable conditioning. For a Neumann edge, use
 /// `numerics::assemble_neumann` with conormal flux `g = n · A ∇u`, add the
 /// resulting vector to the volume load, then impose Dirichlet constraints.
-/// This routine does not implement a nullspace-aware pure-Neumann solve.
+/// This routine does not solve the system. For full Neumann and zero reaction,
+/// use [`crate::neumann::solve_diffusion`] with compatible data.
 pub fn assemble<D, C, F>(
     mesh: &Mesh2,
     diffusion: D,

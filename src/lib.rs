@@ -7,6 +7,8 @@
 pub mod base;
 pub mod dofs;
 pub mod elliptic;
+pub mod elliptic_quad;
+pub mod elliptic_tetra;
 pub mod estimator;
 pub mod fe;
 pub mod field;
@@ -20,8 +22,11 @@ mod neumann_core;
 pub mod neumann_quad;
 pub mod numerics;
 pub mod quad;
+pub mod quad_field;
+mod quad_refinement;
 pub mod quadrature;
 pub mod tetra;
+mod tetra_refinement;
 pub mod vtk;
 
 /// An invalid input or numerical failure.

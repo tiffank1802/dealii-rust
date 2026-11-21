@@ -6,8 +6,9 @@
 
 use crate::base::{triangle_determinant, Point2};
 use crate::grid::{BoundaryEdgeId, CellId, Mesh2, VertexId};
-use crate::lac::{CgOptions, CgReport};
+use crate::lac::{CgOptions, CgReport, CsrMatrix};
 use crate::numerics::{assemble_neumann, assemble_poisson};
+use crate::{elliptic, integrators::DiffusionTensor};
 use crate::{error, neumann_core, Result};
 
 /// Options for checking discrete compatibility and solving the pinned system.
@@ -84,7 +85,50 @@ where
     G: Fn(Point2, [f64; 2]) -> f64,
 {
     neumann_core::validate(options)?;
-    let (matrix, mut rhs) = assemble_poisson(mesh, source)?;
+    let (matrix, rhs) = assemble_poisson(mesh, source)?;
+    finish(mesh, matrix, rhs, flux, options)
+}
+
+/// Solve `-div(A∇u) = source` with conormal flux `g = n·A∇u` on the
+/// entire boundary, no reaction term. `diffusion` and `source` receive the
+/// cell ID and physical quadrature point; `flux` receives point and outward
+/// normal and must provide the actual conormal flux (including material data).
+/// In particular, boundary flux is not inferred from the cellwise tensor.
+///
+/// As in [`solve`], assembled compatibility is checked independently per
+/// DoF component, then temporary pins and the FEM integral mean fix the
+/// nullspace; no load projection is performed. Quadrature error is included
+/// in the compatibility test. [`elliptic::assemble`] checks tensor positive
+/// definiteness only at quadrature points, not global ellipticity or adequate
+/// conditioning. The caller must provide a conforming, nonoverlapping mesh
+/// and compatible boundary/interface data. This is not a reaction solver.
+pub fn solve_diffusion<D, F, G>(
+    mesh: &Mesh2,
+    diffusion: D,
+    source: F,
+    flux: G,
+    options: NeumannOptions,
+) -> Result<NeumannSolution>
+where
+    D: Fn(CellId, Point2) -> DiffusionTensor,
+    F: Fn(CellId, Point2) -> f64,
+    G: Fn(Point2, [f64; 2]) -> f64,
+{
+    neumann_core::validate(options)?;
+    let (matrix, rhs) = elliptic::assemble(mesh, diffusion, |_, _| 0.0, source)?;
+    finish(mesh, matrix, rhs, flux, options)
+}
+
+fn finish<G>(
+    mesh: &Mesh2,
+    matrix: CsrMatrix,
+    mut rhs: Vec<f64>,
+    flux: G,
+    options: NeumannOptions,
+) -> Result<NeumannSolution>
+where
+    G: Fn(Point2, [f64; 2]) -> f64,
+{
     let boundary: Vec<_> = (0..mesh.boundary_edges().len())
         .map(BoundaryEdgeId)
         .collect();

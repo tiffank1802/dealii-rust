@@ -6,6 +6,7 @@ use crate::base::Point3;
 use crate::grid::{CellId, VertexId};
 use crate::lac::{CooBuilder, CsrMatrix};
 use crate::quadrature::{tetra_degree_5, triangle_degree_5};
+pub use crate::tetra_refinement::UniformRefinement;
 use crate::{error, Result};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Write};
@@ -507,7 +508,8 @@ pub fn interpolate_boundary<F: Fn(Point3) -> f64>(
 
 /// Assemble `∫ g φ_i dS` over selected tetrahedral boundary faces.
 /// For `-Δu=f`, the callback receives the physical point and the unit
-/// **outward** normal and must return `g = ∂u/∂n`. Its contribution is added
+/// **outward** normal and must return `g = ∂u/∂n` (or the conormal flux
+/// `g = n · A∇u` for anisotropic diffusion). Its contribution is added
 /// to the volume right-hand side before Dirichlet elimination. Face IDs must
 /// belong to this mesh, be in bounds and be unique. Nonfinite values and
 /// nonrepresentable results are rejected.

@@ -39,3 +39,7 @@ Les fichiers amont cités sont des repères fonctionnels représentatifs, pas un
 5. En P2, fermer les contraintes affines, détecter les cycles et calculer la forme réduite ; conserver cette mécanique algébrique indépendante de `dofs`.
 
 **Tests ciblés :** CSR avec doublons/lignes vides, multiplication connue, Dirichlet non homogène et contraintes multiples, petit système SPD, second membre nul, dimension erronée, budget épuisé et rupture. Ne pas présenter un test de rupture comme une détection complète de non-SPD.
+
+**CG initialisé :** `conjugate_gradient_with_initial_guess` accepte un vecteur initial, contrôle le résidu réel et conserve le critère basé sur `||b||`. Une estimation prolongée doit être adaptée aux valeurs de Dirichlet du système éliminé ; aucun gain en itérations n’est garanti.
+
+**Jacobi :** `JacobiPreconditioner` copie la diagonale CSR et valide sa positivité ; `conjugate_gradient_jacobi` et sa variante avec estimation initiale conservent le contrôle du résidu non préconditionné. Construire le préconditionneur après les contraintes et le reconstruire si la matrice change. La positivité de la diagonale ne prouve pas que la matrice est SPD, et le gain n’est pas garanti. GMRES et autres préconditionneurs restent à faire.

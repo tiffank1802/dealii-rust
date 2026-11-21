@@ -1,7 +1,8 @@
 //! Pure Neumann Poisson on P1 tetrahedra, with integral mean zero per component.
 use crate::base::Point3;
+use crate::elliptic_tetra::{self, DiffusionTensor3};
 use crate::grid::{CellId, VertexId};
-use crate::lac::CgReport;
+use crate::lac::{CgReport, CsrMatrix};
 pub use crate::neumann::NeumannOptions;
 use crate::tetra::{self, AffineTet, BoundaryFaceId, TetMesh};
 use crate::{error, neumann_core, Result};
@@ -52,7 +53,49 @@ where
     G: Fn(Point3, [f64; 3]) -> f64,
 {
     neumann_core::validate(options)?;
-    let (matrix, mut rhs) = tetra::assemble_poisson(mesh, source)?;
+    let (matrix, rhs) = tetra::assemble_poisson(mesh, source)?;
+    finish(mesh, matrix, rhs, flux, options)
+}
+
+/// Solve `-div(A∇u)=source` with full-boundary conormal flux `n·A∇u`,
+/// without reaction. Coefficient and source callbacks receive the cell ID
+/// and physical quadrature point; the flux callback receives point and outward
+/// normal and must supply the actual conormal flux, including material data.
+/// It is not inferred from the cellwise diffusion tensor.
+///
+/// Uses the same discrete compatibility checks, pinning and P1 integral-mean
+/// normalization as [`solve`]. The caller must provide a conforming,
+/// nonoverlapping mesh and compatible boundary/interface data. The checks in
+/// [`elliptic_tetra::assemble`] establish positivity only at quadrature points,
+/// not global ellipticity or good conditioning. Quadrature error affects
+/// compatibility. This is not a reaction solver.
+pub fn solve_diffusion<D, F, G>(
+    mesh: &TetMesh,
+    diffusion: D,
+    source: F,
+    flux: G,
+    options: NeumannOptions,
+) -> Result<NeumannSolution>
+where
+    D: Fn(CellId, Point3) -> DiffusionTensor3,
+    F: Fn(CellId, Point3) -> f64,
+    G: Fn(Point3, [f64; 3]) -> f64,
+{
+    neumann_core::validate(options)?;
+    let (matrix, rhs) = elliptic_tetra::assemble(mesh, diffusion, |_, _| 0.0, source)?;
+    finish(mesh, matrix, rhs, flux, options)
+}
+
+fn finish<G>(
+    mesh: &TetMesh,
+    matrix: CsrMatrix,
+    mut rhs: Vec<f64>,
+    flux: G,
+    options: NeumannOptions,
+) -> Result<NeumannSolution>
+where
+    G: Fn(Point3, [f64; 3]) -> f64,
+{
     let faces: Vec<_> = (0..mesh.boundary_faces().len())
         .map(BoundaryFaceId)
         .collect();

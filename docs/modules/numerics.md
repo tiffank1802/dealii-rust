@@ -41,8 +41,12 @@ Les fichiers amont cités sont des repères fonctionnels représentatifs, pas un
 
 **État P1 partiel :** `field` propose l’interpolation nodale et de bord, la masse consistante, la projection L2 via CG et la recherche/évaluation ponctuelle par balayage. Les tolérances, la quadrature et les limites de classification sont détaillées dans le README ; champs vectoriels, spatialisation et formulation générale restent à faire.
 
-**Diffusion-réaction :** `elliptic::assemble` accepte des coefficients dépendant de la cellule, et réutilise `numerics::assemble_neumann` pour le flux conormal. Voir le README pour les limites de quadrature, de coercivité et du solveur Neumann pur.
+**Diffusion-réaction :** `elliptic::assemble` sur P1 triangulaire, `elliptic_quad::assemble` sur Q1 et `elliptic_tetra::assemble` sur P1 tétraédrique acceptent des coefficients dépendant de la cellule. Utiliser respectivement `numerics::assemble_neumann`, `quad::assemble_neumann` ou `tetra::assemble_neumann` pour le flux conormal. Voir le README pour les limites de quadrature, de coercivité et du solveur Neumann pur.
 
 **Conditions mixtes 3D :** `tetra::assemble_neumann` intègre le flux sur les faces triangulaires orientées et `tetra::interpolate_boundary` construit les valeurs de Dirichlet. `neumann3d::solve` traite le Neumann pur tétraédrique avec contrôle par composante et normalisation intégrale.
 
 **Conditions mixtes Q1 :** `quad::assemble_neumann` intègre le flux et `quad::interpolate_boundary` produit les valeurs de Dirichlet. `neumann_quad::solve` traite le Neumann pur Q1, avec contrôle de compatibilité par composante et moyenne intégrale calculée à partir des poids Q1.
+
+**Neumann pur anisotrope :** `neumann::solve_diffusion`, `neumann_quad::solve_diffusion` et `neumann3d::solve_diffusion` traitent la diffusion scalaire sans réaction ; le flux conormal est fourni par l’appelant et la compatibilité assemblée est vérifiée par composante.
+
+**Champs Q1 :** `quad_field` fournit interpolation nodale, matrice de masse, projection L² et évaluation en coordonnées physiques sur quadrilatères ; la recherche est linéaire et les correspondances par tolérance sont projetées sur le bord. `quad::interpolate_boundary` traite les valeurs de bord. Voir le README pour les limites de quadrature et de conditionnement.

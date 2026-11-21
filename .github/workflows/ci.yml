@@ -19,6 +19,7 @@ jobs:
       - run: cargo test --doc
       - run: cargo doc --no-deps
       - run: cargo run --example poisson_2d -- 8
+      - run: cargo run --example poisson_jacobi -- 8
       - run: cargo run --example poisson_q1 -- 8
       - run: cargo run --example poisson_q1_mixed -- 8
       - run: cargo run --example poisson_q1_neumann -- 8
@@ -29,8 +30,14 @@ jobs:
       - run: cargo run --example poisson_neumann -- 8
       - run: cargo run --example poisson_gmsh
       - run: cargo run --example poisson_refinement
+      - run: cargo run --example poisson_q1_refinement
+      - run: cargo run --example poisson_3d_refinement
       - run: cargo run --example field_tools
+      - run: cargo run --example quad_field_tools -- 8
       - run: cargo run --example elliptic_mixed -- 8
+      - run: cargo run --example elliptic_q1_mixed -- 8
+      - run: cargo run --example elliptic_3d_mixed -- 4
+      - run: cargo run --example elliptic_3d_neumann -- 4
   style:
     runs-on: ubuntu-latest
     steps:

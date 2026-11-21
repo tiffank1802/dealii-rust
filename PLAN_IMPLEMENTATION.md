@@ -45,8 +45,8 @@ Commencer par **une seule crate bibliothèque** organisée en modules ; extraire
 | `quadrature` | Règles sur triangle, carré et tétraèdre de référence, degrés d’exactitude documentés | Autres cellules et règles |
 | `fe` / `quad` / `tetra` | P1 sur triangles et tétraèdres, Q1 sur quadrilatères, valeurs, gradients et mappings | Ordre supérieur, autres cellules 3D et transformations H(div)/H(curl) |
 | `dofs` | Numérotation globale P1 conforme par sommet, indices locaux → globaux | Éléments vectoriels, orientations, contraintes et renumérotation |
-| `lac` | Triplets COO, compression CSR, produit matrice-vecteur, CG et diagnostic | Backends externes, préconditionneurs et autres solveurs |
-| `integrators` / `elliptic` | Intégration locale et assemblage P1 de diffusion-réaction symétrique | Advection, systèmes vectoriels et autres intégrateurs |
+| `lac` | Triplets COO, compression CSR, produit matrice-vecteur, CG avec estimation initiale, Jacobi et diagnostic | Backends externes, autres préconditionneurs et solveurs |
+| `integrators` / `elliptic` / `elliptic_quad` / `elliptic_tetra` | Intégration locale et assemblage P1 et Q1 de diffusion-réaction symétrique | Advection, systèmes vectoriels et autres intégrateurs |
 | `numerics` / `field` | Assemblage Poisson, conditions aux limites, erreurs, interpolation et projection P1 | Formulations générales et adaptation |
 | `io` / `gmsh` | Export VTK et import limité MSH 4.1 ASCII avec groupes physiques | Autres variantes Gmsh, formats et interopérabilité |
 
@@ -113,7 +113,7 @@ Chaque jalon doit inclure code, documentation, tests et exemple pertinent ; il n
 
 ### J6 — Maillages et éléments supplémentaires
 
-**En cours :** les parcours Poisson-Dirichlet Q1 2D et P1 tétraédrique 3D expérimentaux sont implémentés avec exemples, tests géométriques et de convergence. Les conditions mixtes et Neumann pur à moyenne intégrale nulle sont traités sur quadrilatères et tétraèdres. La validation sur Rust stable et MSRV en CI et les extensions (import et autres formulations) restent à faire.
+**En cours :** les parcours Poisson-Dirichlet Q1 2D et P1 tétraédrique 3D expérimentaux sont implémentés avec exemples, tests géométriques et de convergence. Les conditions mixtes et Neumann pur à moyenne intégrale nulle sont traités sur quadrilatères et tétraèdres ; l’assemblage diffusion-réaction anisotrope couvre également Q1 et P1 tétraédrique, avec un solveur Neumann pur pour la diffusion sans réaction sur les trois types de cellules. Interpolation nodale, projection L² et évaluation ponctuelle physique Q1 sont disponibles. La validation sur Rust stable et MSRV en CI et les extensions (import et autres formulations) restent à faire.
 
 - Ajouter Q1 sur quadrilatères, puis tétraèdres P1 en 3D ; traiter explicitement l’ordre local, les orientations, les faces et les mappings non affines lorsque nécessaires.
 - Généraliser les interfaces seulement après identification des points communs et des différences ; conserver les tests de Poisson 2D.
@@ -121,7 +121,7 @@ Chaque jalon doit inclure code, documentation, tests et exemple pertinent ; il n
 
 ### J7 — Adaptativité et éléments d’ordre supérieur
 
-**Amorce expérimentale :** raffinement global conforme en quatre triangles, relations parent/enfants à un niveau, transfert P1 et indicateur résiduel pour Poisson homogène. Ce n’est pas encore une adaptation locale ni une hiérarchie persistante.
+**Amorce expérimentale :** raffinement global conforme en quatre triangles, quatre quadrilatères ou huit tétraèdres, relations parent/enfants à un niveau, transfert P1/Q1 et indicateur résiduel pour Poisson homogène triangulaire. Ce n’est pas encore une adaptation locale ni une hiérarchie persistante.
 
 - Définir la hiérarchie de cellules, le marquage, le raffinement et le transfert de solution ; introduire les contraintes affines et les hanging nodes avec tests de continuité.
 - Ajouter estimation d’erreur, raffinement local puis éléments d’ordre supérieur ; traiter ensuite l’adaptation `hp`, les orientations et les contraintes entre ordres différents.

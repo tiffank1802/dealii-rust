@@ -22,7 +22,7 @@ impl DiffusionTensor {
         }
     }
 
-    fn validate(self) -> Result<()> {
+    pub(crate) fn validate(self) -> Result<()> {
         if !self.xx.is_finite()
             || !self.xy.is_finite()
             || !self.yy.is_finite()

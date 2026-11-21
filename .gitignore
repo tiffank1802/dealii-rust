@@ -11,3 +11,10 @@
 /poisson_3d_neumann.vtk
 /poisson_q1_mixed.vtk
 /poisson_q1_neumann.vtk
+/elliptic_q1_mixed.vtk
+/elliptic_3d_mixed.vtk
+/elliptic_3d_neumann.vtk
+/poisson_q1_refinement.vtk
+/poisson_3d_refinement.vtk
+/poisson_jacobi.vtk
+/quad_field_projection.vtk

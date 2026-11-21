@@ -5,6 +5,7 @@
 //! isoparametric bilinear map; quadrature is tensor-product Gauss 3×3.
 //! This module is separate from the triangle APIs and accepts only convex,
 //! nondegenerate cells. Global geometric conformity is the caller's duty.
+pub use crate::quad_refinement::UniformRefinement;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Write};
 
@@ -476,7 +477,8 @@ pub fn interpolate_boundary<F: Fn(Point2) -> f64>(
 
 /// Assemble `∫g φ_i ds` on selected Q1 boundary edges for `-Δu=f`.
 /// The callback receives the physical point and the unit **outward** normal;
-/// it supplies `g=∂u/∂n`. Add this load before Dirichlet elimination.
+/// it supplies `g=∂u/∂n`, or `g=n·A∇u` for anisotropic diffusion.
+/// Add this load before Dirichlet elimination.
 /// Edge IDs must belong to this mesh, be unique and in bounds. Boundary
 /// edges of a bilinear quadrilateral are straight and the Q1 trace is linear;
 /// the degree-five Gauss rule is exact for polynomial fluxes through degree 4

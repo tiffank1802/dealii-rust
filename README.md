@@ -13,7 +13,19 @@ cargo run --example poisson_2d -- 16
 
 L’argument facultatif est le nombre de subdivisions par côté (16 par défaut). L’exemple écrit `poisson_2d.vtk` dans le répertoire courant, au format VTK Legacy ASCII, visualisable par exemple avec ParaView. Il affiche le nombre d’itérations, le résidu et les erreurs L2 et en semi-norme H1. Les fichiers générés ne sont pas versionnés.
 
-Le gradient conjugué démarre à zéro et utilise par défaut `max(1e-12, 1e-10 × ||b||)` comme seuil de norme du résidu, avec 10 000 itérations au maximum. La matrice doit être symétrique définie positive ; une rupture ou une non-convergence est signalée par une erreur. Le résidu annoncé est recalculé à partir de `b − Ax`.
+`lac::conjugate_gradient` démarre à zéro et utilise par défaut `max(1e-12, 1e-10 × ||b||)` comme seuil de norme du résidu, avec 10 000 itérations au maximum. La matrice doit être symétrique définie positive ; une rupture ou une non-convergence est signalée par une erreur. Le résidu annoncé est recalculé à partir de `b − Ax`. `lac::conjugate_gradient_with_initial_guess` accepte un vecteur initial fini sans le modifier ; le seuil reste fondé sur `||b||`, et non sur le résidu initial. Une estimation déjà convergée retourne zéro itération, y compris avec un budget nul. Une bonne estimation peut réduire les itérations sans le garantir. Pour un système après élimination de Dirichlet, initialiser les entrées contraintes aux valeurs prescrites ; la fonction ne le fait pas automatiquement. Les plages numériques extrêmes peuvent entraîner une rupture due aux produits scalaires non représentables.
+
+## Gradient conjugué préconditionné par Jacobi
+
+```sh
+cargo run --example poisson_jacobi -- 16
+```
+
+`lac::JacobiPreconditioner::new` extrait la diagonale d’une matrice CSR carrée et exige des entrées diagonales finies strictement positives. `conjugate_gradient_jacobi` résout depuis zéro ; `conjugate_gradient_jacobi_with_initial_guess` accepte aussi une estimation initiale. Le préconditionneur applique `M⁻¹r` avec `M = diag(A)`, mais le critère d’arrêt et le résidu annoncé restent basés sur la norme **non préconditionnée** `||b − Ax||` et le seuil `max(tol_abs, tol_rel × ||b||)`.
+
+Construire Jacobi **après** l’élimination de Dirichlet, et le reconstruire si la matrice, les contraintes ou le maillage changent : il conserve une copie de l’ancienne diagonale. Une diagonale positive ne démontre pas que la matrice est symétrique définie positive, précondition requise par CG. Un produit scalaire ou un résultat de préconditionnement non représentable, une rupture ou la non-convergence produit une erreur. Aucun gain de convergence n’est garanti.
+
+L’exemple compare les deux solveurs sur une diffusion triangulaire P1 à deux matériaux, sans solution analytique, et écrit `poisson_jacobi.vtk`. Pour `n=16`, une exécution locale a donné 325 itérations sans préconditionnement et 45 avec Jacobi, avec des solutions numériquement proches ; ces chiffres dépendent du problème et ne constituent pas un benchmark général.
 
 ## Poisson sur quadrilatères Q1
 
@@ -23,7 +35,7 @@ cargo run --example poisson_q1 -- 16
 
 Ce second parcours résout le même problème manufacturé sur un maillage de quadrilatères Q1, et écrit `poisson_q1.vtk` (VTK Legacy ASCII, cellules de type quadrilatère). `quad::QuadMesh` et `quad::BilinearMap` sont séparés de l’API triangulaire ; les IDs de sommets et cellules ne doivent pas être échangés entre maillages. Chaque cellule est ordonnée dans le sens antihoraire selon les sommets de référence `(0,0), (1,0), (1,1), (0,1)`. Le mapping isoparamétrique est bilinéaire et le Jacobien est évalué à chaque point. Les quadrilatères non convexes, inversés ou dégénérés sont rejetés ; le déterminant aux quatre coins doit dépasser `64 ε` fois le carré de la plus grande arête. Les intersections, recouvrements et nœuds pendants entre cellules ne sont pas détectés : le maillage fourni doit être conforme.
 
-L’assemblage et les erreurs utilisent la règle de Gauss tensorisée 3×3, exacte sur le carré de référence jusqu’au degré 5 **dans chaque coordonnée**. Pour un mapping non affine, l’intégrande de rigidité est généralement rationnel et l’intégration est approchée. Les tests comprennent un patch affine sur maillage déformé, des matrices analytiques et la convergence sur grilles régulières et déformées. Le parcours Q1 couvre Poisson avec Dirichlet, conditions mixtes ou Neumann pur ; les API triangulaires de diffusion-réaction, import Gmsh, raffinements et indicateurs ne s’appliquent pas aux quadrilatères. Les tétraèdres 3D disposent d’un parcours séparé, décrit ci-dessous.
+L’assemblage et les erreurs utilisent la règle de Gauss tensorisée 3×3, exacte sur le carré de référence jusqu’au degré 5 **dans chaque coordonnée**. Pour un mapping non affine, l’intégrande de rigidité est généralement rationnel et l’intégration est approchée. Les tests comprennent un patch affine sur maillage déformé, des matrices analytiques et la convergence sur grilles régulières et déformées. Le parcours Q1 couvre Poisson avec Dirichlet, conditions mixtes ou Neumann pur ; les API triangulaires d’import Gmsh, de raffinement et d’indicateurs ne s’appliquent pas aux quadrilatères, qui disposent d’un raffinement uniforme séparé. Les tétraèdres 3D disposent d’un parcours séparé, décrit ci-dessous.
 
 ### Conditions mixtes sur quadrilatères Q1
 
@@ -45,6 +57,16 @@ L’exemple utilise `−Δu = −4`, `g = 2(x nₓ + y nᵧ)` et la solution de 
 
 Le solveur ancre temporairement un sommet par composante, résout par CG puis retranche la moyenne intégrale Q1. Les poids `∫φᵢ` sont calculés avec la quadrature 3×3 : sur un quadrilatère bilinéaire non affine, ils ne sont en général pas égaux, contrairement à une moyenne nodale. La règle intègre ces poids exactement à l’arrondi près. Le rapport indique l’aire, l’ancre, le déséquilibre et les résidus du système ancré et du système original ; ils peuvent différer si un déséquilibre est accepté dans la tolérance. Ce solveur traite uniquement le Laplacien scalaire unitaire avec Neumann sur tout le bord d’un maillage conforme, sans coefficients variables ni réaction.
 
+### Diffusion anisotrope et réaction Q1
+
+```sh
+cargo run --example elliptic_q1_mixed -- 16
+```
+
+`elliptic_quad::assemble` assemble `∫(∇φᵢ · A∇φⱼ + c φᵢφⱼ)` et `∫f φᵢ` pour `−div(A∇u) + cu = f`, avec des fonctions de coefficient recevant l’ID de cellule et le point physique. L’exemple reprend le problème mixte anisotrope variable du parcours triangulaire et écrit `elliptic_q1_mixed.vtk`. Pour Neumann, `quad::assemble_neumann` doit recevoir le flux **conormal** `g = n · A∇u`, à ajouter au second membre avant l’élimination de Dirichlet.
+
+Le tenseur symétrique `DiffusionTensor` doit être défini positif, `c` non négatif et la source finie aux points de quadrature 3×3 ; cela ne garantit ni ces propriétés entre les points, ni coercivité globale ou bon conditionnement. Pour un mapping non affine, le terme de diffusion est généralement rationnel et son intégration approchée. Le système n’est pas toujours défini positif : pour `c = 0` et Neumann sur tout le bord, son noyau comporte les constantes par composante. `neumann_quad::solve` reste réservé au Laplacien unitaire ; pour une diffusion anisotrope sans réaction, utiliser `neumann_quad::solve_diffusion`. Une réaction positive peut supprimer le noyau.
+
 ## Poisson P1 sur tétraèdres 3D
 
 ```sh
@@ -55,7 +77,7 @@ Cet exemple résout `−Δu = 3π²u` sur le cube unité avec Dirichlet homogèn
 
 Les tétraèdres utilisent les sommets de référence `(0,0,0), (1,0,0), (0,1,0), (0,0,1)` et un mapping affine d’orientation positive. Un déterminant inférieur ou égal à `64 ε` fois le cube de la longueur de la plus grande arête est rejeté. Les faces partagées doivent avoir des orientations opposées ; les faces de frontière sont orientées vers l’extérieur et leurs normales et aires sont accessibles. Comme pour les maillages 2D, les intersections, recouvrements et nœuds pendants ne sont pas détectés : la conformité géométrique reste une précondition.
 
-La source et les erreurs utilisent une quadrature Gauss-Duffy à 64 points, exacte pour les polynômes de degré total ≤ 5 sur le tétraèdre de référence, à l’arrondi près. Les tests vérifient les monômes, la matrice locale analytique, les normales, un patch affine et la convergence L2/H1. Ce parcours 3D est limité à Poisson scalaire avec Dirichlet, conditions mixtes ou Neumann pur ; la diffusion-réaction, l’import Gmsh 3D et le raffinement des tétraèdres ne sont pas implémentés.
+La source et les erreurs utilisent une quadrature Gauss-Duffy à 64 points, exacte pour les polynômes de degré total ≤ 5 sur le tétraèdre de référence, à l’arrondi près. Les tests vérifient les monômes, la matrice locale analytique, les normales, un patch affine et la convergence L2/H1. Le parcours 3D couvre Poisson, l’assemblage diffusion-réaction scalaire et le raffinement uniforme ; l’import Gmsh 3D n’est pas implémenté.
 
 ### Conditions mixtes sur tétraèdres
 
@@ -66,6 +88,18 @@ cargo run --example poisson_3d_mixed -- 8
 L’exemple utilise `u = 1 + x + x² + 2y + y² + 3z + z²`, avec Dirichlet sur `x = 0` et le flux sortant `g = ∂u/∂n` sur les autres faces. La sélection par coordonnées est propre au cube structuré ; il n’y a pas encore de marqueurs Gmsh 3D. `tetra::interpolate_boundary` déduplique les sommets des faces de Dirichlet ; `tetra::assemble_neumann` intègre `∫g φᵢ dS` sur des `BoundaryFaceId` uniques, avec une quadrature triangulaire de degré 5. Le vecteur obtenu doit être ajouté à la charge volumique **avant** l’élimination de Dirichlet. Les IDs invalides ou répétés et les données non finies sont rejetés.
 
 L’assemblage de charge seul ne résout pas le cas Neumann pur : la matrice de diffusion possède un noyau constant par composante et exige compatibilité et normalisation. Utiliser `neumann3d::solve` pour ce cas ; ne pas appliquer directement CG sur la matrice singulière.
+
+### Diffusion anisotrope et réaction sur tétraèdres
+
+```sh
+cargo run --example elliptic_3d_mixed -- 8
+```
+
+`elliptic_tetra::assemble` assemble `−div(A∇u) + cu = f` sur des tétraèdres P1, avec des coefficients recevant l’ID de cellule propre au maillage et le point physique. Le tenseur `DiffusionTensor3` est symétrique par construction. L’exemple utilise une diffusion anisotrope variable, une réaction et des conditions mixtes ; il écrit `elliptic_3d_mixed.vtk`. Pour les faces de Neumann, fournir à `tetra::assemble_neumann` le flux **conormal** `g = n · A∇u`, à ajouter au second membre avant l’élimination de Dirichlet.
+
+Le tenseur doit être défini positif, `c` non négatif et la source finie aux points de quadrature ; ces vérifications ne garantissent pas ces propriétés entre les points, l’ellipticité uniforme, la coercivité globale ou un bon conditionnement. Le test de positivité utilise une mise à l’échelle diagonale, mais reste sensible aux arrondis près de la singularité. La quadrature tétraédrique de degré 5 intègre exactement à l’arrondi près les coefficients polynomiaux de degré total ≤ 5 pour `A`, ≤ 3 pour `c` et ≤ 4 pour `f` dans ces formes P1.
+
+Avec réaction nulle et Neumann partout, le noyau contient les constantes par composante : l’assemblage seul ne résout pas ce système singulier. `neumann3d::solve` reste réservé au Laplacien unitaire ; pour une diffusion anisotrope sans réaction, utiliser `neumann3d::solve_diffusion`. Une réaction positive peut supprimer le noyau, sans garantie générale de coercivité.
 
 ### Neumann pur 3D
 
@@ -109,7 +143,17 @@ Cet exemple résout `−div(A∇u) + cu = f` sur le carré unité avec `A = [[2+
 
 `integrators::diffusion_reaction_p1` calcule une matrice et un vecteur locaux ; `elliptic::assemble` les assemble en CSR sans imposer de conditions aux limites. Ses fonctions de coefficients reçoivent l’ID de cellule et le point physique : il est donc possible d’utiliser des matériaux constants par cellule à partir des groupes physiques Gmsh. Le tenseur `DiffusionTensor` est symétrique par construction. Il doit être défini positif, la réaction doit être non négative et la source finie ; ces propriétés sont contrôlées **uniquement aux points de quadrature**, pas entre eux. L’utilisateur doit garantir l’ellipticité uniforme et les hypothèses du problème continu. Des coefficients très mal conditionnés ou des plages numériques extrêmes peuvent rendre le système peu fiable même après ces contrôles.
 
-La quadrature triangulaire de degré 5 intègre exactement, à l’arrondi près, un tenseur polynomial de degré ≤ 5, une réaction de degré ≤ 3 et une source de degré ≤ 4 dans ces formes P1 ; pour les autres données, elle introduit une erreur de quadrature. Ajouter `∫g v` au second membre avec `numerics::assemble_neumann`, où **`g = n · A∇u`** est le flux conormal sortant, puis imposer Dirichlet si nécessaire. L’assemblage ne garantit pas que le système soit défini positif : avec `c = 0` et Neumann partout, il existe un noyau constant par composante. `neumann::solve` reste réservé au Laplacien unitaire ; il ne résout pas ce problème elliptique généralisé. Une réaction positive peut supprimer le noyau. L’indicateur `estimator::poisson_dirichlet` reste lui aussi réservé au Laplacien unitaire sans réaction.
+La quadrature triangulaire de degré 5 intègre exactement, à l’arrondi près, un tenseur polynomial de degré ≤ 5, une réaction de degré ≤ 3 et une source de degré ≤ 4 dans ces formes P1 ; pour les autres données, elle introduit une erreur de quadrature. Ajouter `∫g v` au second membre avec `numerics::assemble_neumann`, où **`g = n · A∇u`** est le flux conormal sortant, puis imposer Dirichlet si nécessaire. L’assemblage ne garantit pas que le système soit défini positif : avec `c = 0` et Neumann partout, il existe un noyau constant par composante. `neumann::solve` reste réservé au Laplacien unitaire ; pour la diffusion anisotrope sans réaction, utiliser `neumann::solve_diffusion`. Une réaction positive peut supprimer le noyau. L’indicateur `estimator::poisson_dirichlet` reste lui aussi réservé au Laplacien unitaire sans réaction.
+
+### Neumann pur avec diffusion anisotrope
+
+```sh
+cargo run --example elliptic_3d_neumann -- 8
+```
+
+`neumann::solve_diffusion`, `neumann_quad::solve_diffusion` et `neumann3d::solve_diffusion` résolvent `−div(A∇u) = f` avec Neumann sur tout le bord et **sans réaction**. Le tenseur et la source reçoivent l’ID de cellule et le point physique ; le flux fourni séparément est le flux **conormal sortant** `g = n · A∇u`, non la simple dérivée normale. La fonction de flux ne reçoit ni ID de face ni ID de cellule : pour des matériaux discontinus, l’appelant doit fournir le flux adéquat à partir des informations dont il dispose. Les données d’interface doivent être cohérentes avec la formulation faible ; aucun saut imposé n’est assemblé automatiquement.
+
+Comme pour Poisson, la compatibilité est vérifiée sur le second membre assemblé pour chaque composante, sans projection, puis une ancre temporaire et la moyenne intégrale FEM fixent la constante. Les rapports incluent les résidus du système ancré et du système original. Les tenseurs sont contrôlés uniquement aux points de quadrature ; l’utilisateur garantit la conformité du maillage, l’ellipticité et un conditionnement adaptés. L’exemple 3D écrit `elliptic_3d_neumann.vtk` et utilise la solution de moyenne nulle `u = x² + y² + z² − 1`.
 
 ## Import Gmsh et résolution sur maillage étiqueté
 
@@ -134,13 +178,43 @@ Le module `field` travaille sur des champs scalaires P1 continus : `interpolate`
 
 `locate` et `evaluate` recherchent un point par parcours linéaire des cellules. Une tolérance barycentrique explicite, sans dimension, autorise de petits dépassements ; un point réellement contenu numériquement est préféré à un point accepté par tolérance. Sinon la première cellule compatible est choisie. Les poids ne sont pas bornés : une correspondance par tolérance **extrapole** légèrement, elle ne projette pas sur le bord. Un point hors domaine retourne `None` ; les données non finies et débordements détectés retournent une erreur. La classification des points de bord dépend des arrondis et de la qualité géométrique ; l’API suppose un maillage conforme sans recouvrement, comme le reste de `Mesh2`. Elle ne fournit ni index spatial ni évaluation de gradient sur les interfaces.
 
+### Interpolation, projection L² et évaluation Q1
+
+```sh
+cargo run --example quad_field_tools -- 8
+```
+
+`quad_field::interpolate` échantillonne un champ aux sommets de `QuadMesh` ; `quad_field::mass_matrix` assemble la matrice de masse consistante `Mᵢⱼ = ∫φᵢφⱼ`. `projection_system` construit `M u = b`, avec `bᵢ = ∫fφᵢ`, et `project_l2` résout ce système par CG sans contrainte de bord. Pour une projection contrainte, obtenir le système, utiliser `quad::interpolate_boundary` puis `with_dirichlet` avant la résolution. L’exemple compare interpolation et projection d’un champ quadratique, évalue le champ, démontre la prolongation Q1 et écrit `quad_field_projection.vtk`.
+
+La quadrature Gauss 3×3 intègre les entrées de masse Q1 sur un mapping bilinéaire exactement à l’arrondi près. Pour la charge, elle est exacte pour une fonction polynomiale physique de degré total ≤ 3 sur un quadrilatère bilinéaire, ou ≤ 4 si le mapping est affine ; sinon la projection utilise une quadrature approchée. La matrice est définie positive en arithmétique exacte pour un maillage conforme non recouvrant dont tous les sommets sont utilisés, mais le conditionnement numérique n’est pas garanti. Adapter les tolérances CG à l’échelle du champ. `quad_field::locate` et `quad_field::evaluate` recherchent un point physique par parcours linéaire des quadrilatères ; le mapping bilinéaire est inversé par dichotomie bornée. La tolérance est sans dimension et multipliée par la longueur de la plus grande arête de chaque cellule. La première cellule contenant numériquement le point est préférée à toute correspondance par tolérance. Pour un point extérieur accepté par tolérance, l’évaluation se fait sur le point le plus proche de la frontière de la première cellule admissible : elle **projette**, contrairement à `field::locate` P1 qui peut extrapoler. La cellule choisie n’est pas nécessairement la plus proche parmi toutes les cellules admissibles. Un point hors domaine retourne `None` ; les données non finies et les débordements détectés retournent une erreur. La classification au bord et la précision sur les cellules très minces ou fortement translatées restent sensibles aux arrondis ; aucun index spatial ni calcul de gradient à l’interface n’est fourni.
+
 ## Raffinement uniforme et indicateur résiduel
 
 ```sh
 cargo run --example poisson_refinement
 ```
 
-L’exemple résout successivement le problème Poisson homogène sur quatre niveaux uniformes, puis affiche l’erreur H1 et l’indicateur. `grid::UniformRefinement::new` partage les milieux des arêtes et remplace chaque triangle par quatre triangles conformes. Le nouvel objet expose les relations parent/enfants pour les cellules, ainsi que le parent de chaque arête de frontière. Les anciens sommets conservent leurs indices, mais les IDs de cellules et d’arêtes appartiennent à leur maillage respectif. `prolongate_p1` interpole le champ nodal aux milieux et préserve la fonction P1 par morceaux. Les métadonnées Gmsh ne sont **pas** transférées automatiquement ; les relations parentales permettent de les recopier explicitement.
+L’exemple résout successivement le problème Poisson homogène sur quatre niveaux uniformes, utilise le champ prolongé comme estimation initiale après chaque raffinement, puis affiche l’erreur H1 et l’indicateur. `grid::UniformRefinement::new` partage les milieux des arêtes et remplace chaque triangle par quatre triangles conformes. Le nouvel objet expose les relations parent/enfants pour les cellules, ainsi que le parent de chaque arête de frontière. Les anciens sommets conservent leurs indices, mais les IDs de cellules et d’arêtes appartiennent à leur maillage respectif. `prolongate_p1` interpole le champ nodal aux milieux et préserve la fonction P1 par morceaux. Les métadonnées Gmsh ne sont **pas** transférées automatiquement ; les relations parentales permettent de les recopier explicitement.
+
+### Raffinement uniforme Q1
+
+```sh
+cargo run --example poisson_q1_refinement
+```
+
+`quad::UniformRefinement` partage les milieux des arêtes entre cellules et découpe chaque quadrilatère en quatre autour du centre de sa cellule de référence. Il expose `children`, `parent_cell` et `parent_boundary_edge`, ainsi que `prolongate_q1` pour transférer un champ nodal scalaire. En arithmétique exacte, chaque mapping fils est la restriction du mapping bilinéaire parent et la prolongation préserve la fonction Q1 par morceaux, même pour une cellule non affine. Les sommets d’origine conservent leurs indices ; les IDs de cellules et d’arêtes restent propres à chaque maillage.
+
+L’exemple raffine quatre niveaux d’un problème mixte et transmet explicitement la classification Dirichlet/Neumann par les parents d’arêtes ; il écrit le dernier niveau dans `poisson_q1_refinement.vtk`. Les marqueurs ne sont pas copiés automatiquement. Le champ prolongé initialise CG au niveau suivant, après réimposition des valeurs de Dirichlet sur les nouveaux sommets de bord. Le raffinement exige un maillage conforme, est uniforme et décrit un seul niveau à la fois ; il ne fournit ni adaptation locale, ni hiérarchie persistante, ni indicateur Q1. Une géométrie fille non représentable ou dégénérée est rejetée.
+
+### Raffinement uniforme tétraédrique P1
+
+```sh
+cargo run --example poisson_3d_refinement
+```
+
+`tetra::UniformRefinement` partage les milieux des arêtes entre cellules et découpe chaque tétraèdre en huit : quatre tétraèdres aux sommets et quatre dans l’octaèdre central. La plus courte des trois diagonales de l’octaèdre est choisie ; en cas d’égalité, l’ordre local départage. Ce choix ne garantit pas la qualité du maillage. Les faces partagées sont toujours divisées en quatre triangles de manière conforme, et les enfants sont vérifiés et orientés positivement. Une géométrie fille dégénérée ou non représentable est rejetée.
+
+`children`, `parent_cell` et `parent_boundary_face` exposent les relations d’un niveau ; `prolongate_p1` préserve le champ affine par morceaux en interpolant aux milieux des arêtes. Les indices des anciens sommets restent les mêmes, mais les IDs de cellules et faces appartiennent à leurs maillages respectifs. Les marqueurs ne sont pas transférés automatiquement ; l’exemple recopie explicitement la classification des faces de Dirichlet et Neumann depuis leurs parents, résout à chaque niveau et écrit `poisson_3d_refinement.vtk`. Le champ prolongé initialise CG au niveau suivant, après réimposition des valeurs de Dirichlet sur les nouveaux sommets de bord. Le maillage fourni doit être conforme et sans recouvrement ; il n’y a ni raffinement local ni hiérarchie persistante.
 
 `estimator::poisson_dirichlet` fournit des indicateurs par cellule et leur norme globale pour `−Δu = f`, diffusion constante unitaire, P1 triangulaire et Dirichlet homogène sur tout le bord, supposé imposé par l’appelant. Il calcule
 
@@ -152,10 +226,10 @@ L’exemple résout successivement le problème Poisson homogène sur quatre niv
 
 ## Périmètre et validation
 
-- Implémentés : points 2D/3D, triangles et tétraèdres P1, quadrilatères Q1, maillages structurés, mappings affine et bilinéaire, quadratures, assemblage Poisson et diffusion-réaction anisotrope P1, Dirichlet, Neumann mixte ou pur normalisé, COO/CSR, CG, export VTK, import d’un sous-ensemble Gmsh 4.1 ASCII, raffinement uniforme, indicateur résiduel Poisson limité et opérations sur champs P1.
-- Limités au calcul séquentiel scalaire ; pas encore de raffinement local adaptatif, MPI, Trilinos, autres familles d’éléments que P1/Q1 ou prise en charge complète de Gmsh. Le parcours 3D est restreint à Poisson sur tétraèdres P1 avec Dirichlet, conditions mixtes ou Neumann pur. La validation de `Mesh2::new` ne détecte pas les intersections géométriques ni tous les cas non conformes : le maillage fourni doit être conforme.
+- Implémentés : points 2D/3D, triangles et tétraèdres P1, quadrilatères Q1, maillages structurés, mappings affine et bilinéaire, quadratures, assemblage Poisson et diffusion-réaction anisotrope P1 triangulaire et tétraédrique et Q1, Dirichlet, Neumann mixte ou pur normalisé, COO/CSR, CG avec estimation initiale et préconditionnement Jacobi optionnels, export VTK, import d’un sous-ensemble Gmsh 4.1 ASCII, raffinement uniforme, indicateur résiduel Poisson limité et opérations sur champs P1 et Q1.
+- Limités au calcul séquentiel scalaire ; pas encore de raffinement local adaptatif, MPI, Trilinos, autres familles d’éléments que P1/Q1 ou prise en charge complète de Gmsh. Le parcours 3D utilise des tétraèdres P1 ; le solveur Neumann pur anisotrope ne traite pas de réaction. La validation de `Mesh2::new` ne détecte pas les intersections géométriques ni tous les cas non conformes : le maillage fourni doit être conforme.
 - Aucune dépendance Cargo externe. Rust 1.70 est la version minimale **cible**, configurée dans la CI avec la version stable ; ces deux configurations restent à confirmer par leur exécution en CI.
-- Les tests couvrent les matrices locales et globales, les coefficients elliptiques et données invalides, le solveur, les normales, les conditions mixtes et Neumann pur 2D/3D, l’import et les marqueurs Gmsh, le raffinement et le transfert P1, les indicateurs analytiques, l’interpolation, la projection et l’évaluation ponctuelle, les mappings et patch tests Q1 et tétraédriques, ainsi que la convergence des solutions manufacturées. Le fichier VTK a aussi été lu avec `meshio` lors d’une vérification locale.
+- Les tests couvrent les matrices locales et globales, les coefficients elliptiques et données invalides, le solveur, les normales, les conditions mixtes et Neumann pur 2D/3D, l’import et les marqueurs Gmsh, le raffinement et le transfert P1/Q1 en 2D et P1 en 3D, les indicateurs analytiques, l’interpolation, la projection et l’évaluation ponctuelle, les mappings et patch tests Q1 et tétraédriques, ainsi que la convergence des solutions manufacturées. Le fichier VTK a aussi été lu avec `meshio` lors d’une vérification locale.
 
 ## Documentation et plans
 

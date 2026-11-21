@@ -1,4 +1,4 @@
-//! Shared internal nullspace handling for nodal P1 and Q1 Laplacians.
+//! Shared internal nullspace handling for nodal P1 and Q1 pure-diffusion systems.
 use crate::grid::VertexId;
 use crate::lac::{conjugate_gradient, CgReport, CsrMatrix};
 use crate::neumann::NeumannOptions;
@@ -60,7 +60,8 @@ fn components<const N: usize>(n: usize, cells: &[[VertexId; N]]) -> Vec<Vec<usiz
     result
 }
 
-/// Requires a conforming nodal Laplacian, one weight per vertex and valid cell
+/// Requires a conforming nodal diffusion system with a constant kernel,
+/// one weight per vertex and valid cell
 /// indices. This is not a generic singular-matrix solver.
 pub(crate) fn solve<const N: usize>(
     matrix: CsrMatrix,
