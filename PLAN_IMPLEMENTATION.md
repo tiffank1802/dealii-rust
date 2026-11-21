@@ -61,7 +61,7 @@ Ne pas figer dès le départ des traits universels `Mesh`, `Mapping` et `FiniteE
 - Additionner les doublons COO de manière définie lors de la compression CSR ; vérifier bornes, dimensions et cohérence de la matrice.
 - Pour préserver la symétrie nécessaire à CG, éliminer les Dirichlet en modifiant **à la fois lignes, colonnes et second membre** ; tester aussi des valeurs non homogènes avant de les annoncer comme prises en charge.
 - CG exige une matrice symétrique définie positive : documenter cette précondition, fixer tolérance relative/absolue et nombre maximal d’itérations, et renvoyer convergence, résidu, nombre d’itérations ou une erreur explicite en cas de rupture/non-convergence.
-- Les contraintes affines algébriques locales expriment `x = C y + g` et condensent `CᵀAC y = Cᵀ(b − Ag)` ; les cycles sont détectés et les dépendances développées. La détection des hanging nodes est disponible pour un niveau issu d’un parent triangulaire conforme ; le cas général et le raffinement `hp` restent hors MVP.
+- Les contraintes affines algébriques locales expriment `x = C y + g` et condensent `CᵀAC y = Cᵀ(b − Ag)` ; les cycles sont détectés et les dépendances développées. La détection des hanging nodes couvre désormais plusieurs niveaux pour les triangles P1 issus d’un parent conforme ; les autres types de cellules et le raffinement `hp` restent hors MVP.
 
 ## 4. Jalons et ordre de réalisation
 
@@ -121,9 +121,9 @@ Chaque jalon doit inclure code, documentation, tests et exemple pertinent ; il n
 
 ### J7 — Adaptativité et éléments d’ordre supérieur
 
-**Amorce expérimentale :** raffinement global conforme en quatre triangles, quatre quadrilatères ou huit tétraèdres, relations parent/enfants à un niveau, transfert P1/Q1 et indicateur résiduel pour Poisson homogène triangulaire. Un raffinement local red-green conforme, le marquage de Dörfler, une pile persistante de niveaux et le retour d’un niveau complet sont disponibles pour les triangles P1. La réduction algébrique et un raffinement non conforme P1 triangulaire à un niveau avec détection des nœuds pendants depuis le parent sont ajoutés localement ; aucun déraffinement sélectif, traitement non conforme multiniveau ni adaptation locale Q1/3D n’est fourni.
+**Amorce expérimentale :** raffinement global conforme en quatre triangles, quatre quadrilatères ou huit tétraèdres, relations parent/enfants à un niveau, transfert P1/Q1 et indicateur résiduel pour Poisson homogène triangulaire. Un raffinement local red-green conforme, le marquage de Dörfler, une pile persistante de niveaux et le retour d’un niveau complet sont disponibles pour les triangles P1. La réduction algébrique est ajoutée localement ; le type non conforme spécialisé à un niveau avec détection des nœuds pendants depuis le parent reste inchangé pour les parcours existants, et un chemin multiniveau P1 triangulaire (`NonconformingMesh`, `NonconformingRefinement` avec `refine` et `coarsen` sélectif, `NonconformingRefinementHistory`) est désormais disponible avec un exemple adaptatif. L’adaptation locale Q1/3D n’est toujours pas fournie.
 
-- Étendre la hiérarchie, le marquage et le transfert ; généraliser au multiniveau la topologie non conforme et la génération des contraintes, actuellement limitées à un niveau triangulaire.
+- Étendre la hiérarchie, le marquage et le transfert ; la topologie non conforme et la génération des contraintes sont désormais livrées sur plusieurs niveaux pour les triangles P1, et restent à généraliser aux autres types de cellules avec un estimateur d’erreur associé.
 - Ajouter estimation d’erreur, raffinement local puis éléments d’ordre supérieur ; traiter ensuite l’adaptation `hp`, les orientations et les contraintes entre ordres différents.
 - **Terminé si** des tests de convergence et de continuité sur maillages non conformes passent, et si un exemple adaptatif est reproductible. `hp` exige des critères supplémentaires propres à chaque famille d’éléments.
 
@@ -169,7 +169,7 @@ Ne pas ajouter toutes ces dépendances à J0 : réaliser un prototype ciblé, no
 
 1. Exécuter le protocole de comparaison Q1 préparé avec une installation deal.II, puis élargir à des maillages et formulations plus variés.
 2. Étendre progressivement l’interopérabilité au-delà du sous-ensemble Gmsh actuel et tester les formats avec des outils externes.
-3. Étendre la pile de niveaux au déraffinement sélectif et généraliser les contraintes et la topologie non conforme au multiniveau, avant toute adaptation `hp`.
+3. Généraliser la topologie et les contraintes non conformes aux autres types de cellules (Q1/3D) et ajouter un estimateur d’erreur associé, avant toute adaptation `hp`.
 4. Mesurer les performances et étudier les besoins de solveurs, préconditionneurs et parallélisme avant d’intégrer des backends optionnels.
 
 Voir le [rapport d’avancement](docs/RAPPORT_AVANCEMENT.md) pour le bilan et les validations de l’état courant.

@@ -221,7 +221,7 @@ cargo run --example poisson_local_refinement
 
 L’exemple utilise `estimator::mark_bulk` (marquage de Dörfler sur les indicateurs au carré, `θ=0,5`), résout et prolonge la solution, puis illustre le retour d’un niveau avec injection nodale. La diminution observée de l’erreur n’est pas une garantie générale d’adaptativité optimale. Il écrit `poisson_local_refinement.vtk` avec la solution par sommet et l’indicateur par cellule ; `vtk::write_scalar_with_cell_scalar` exporte des scalaires double, pas des métadonnées Gmsh ni des IDs entiers arbitrairement grands. Avec `meshio` et `numpy` optionnels, `python scripts/check_vtk_meshio.py poisson_local_refinement.vtk` vérifie les associations et valeurs finies.
 
-### Un niveau non conforme avec nœuds pendants P1
+### Multi-level non-conforming refinement with P1 hanging nodes
 
 ```sh
 cargo run --example poisson_hanging -- 4
@@ -231,7 +231,31 @@ cargo run --example poisson_hanging -- 4
 
 `assemble_poisson` assemble les termes volumiques P1 de `−Δu=f` sur ce maillage ; ajouter explicitement les valeurs de Dirichlet issues de `interpolate_boundary`, fermer les contraintes, condenser, résoudre puis reconstruire. Les parents des cellules et des arêtes de bord ainsi que la prolongation P1 d’un champ parent sont exposés, sans transfert automatique de marqueurs. Si tous les degrés de liberté sont contraints, reconstruire directement avec un vecteur réduit vide. L’exemple utilise un marquage fixe, pas un indicateur adaptatif, et résout une solution quadratique à Dirichlet non homogène.
 
-Ce type est distinct de `Mesh2` : **ne pas reconstruire un `Mesh2` avec sa connectivité non conforme**, car son algorithme de frontière interpréterait les interfaces comme des arêtes extérieures. Le maillage parent doit être conforme et sans recouvrement, ce qui n’est pas entièrement vérifié. Seul un niveau issu d’un parent conforme est pris en charge : pas de raffinement non conforme multiniveau, déraffinement sélectif, recherche de points, estimateur non conforme, intégration Neumann, assemblage elliptique général ou détection géométrique de nœuds pendants arbitraires.
+Ce type est distinct de `Mesh2` : **ne pas reconstruire un `Mesh2` avec sa connectivité non conforme**, car son algorithme de frontière interpréterait les interfaces comme des arêtes extérieures. Le maillage parent doit être conforme et sans recouvrement, ce qui n’est pas entièrement vérifié. Multi-level refinement and selective coarsening are described below; point location, a nonconforming estimator, Neumann integration, general elliptic assembly and geometric detection of arbitrary hanging nodes remain out of scope.
+
+### Adaptive multi-level non-conforming Poisson
+
+```sh
+cargo run --example poisson_nonconforming_adaptive -- 4
+```
+
+`grid::NonconformingMesh` is the additive mesh view for active (leaf) cells,
+parent provenance, split edges, hanging nodes and exterior boundary data.
+`NonconformingRefinement::refine` refines an already non-conforming mesh and
+reuses midpoints from earlier levels; `coarsen` selectively restores the parent
+of a fully marked sibling group, one level per call. All typed IDs are
+invalidated by coarsening, as documented on the method.
+`grid::NonconformingRefinementHistory` retains every level with `refine`,
+`coarsen_last`, `level`, `mesh` and `mesh_at`. Multi-level hanging-node rules are
+assembled by `hanging_constraints` and composed through `AffineConstraints::close`
+before `condense` and reconstruction.
+
+The example marks a deterministic patch from the conforming parent, refines one
+isolated cell a second time, solves `−Δu = −4` with `u = x² + y²` Dirichlet data,
+checks that every hanging-node value is the mean of its masters, and coarsens the
+second-level cell back to its parent. Unbalanced level differences are allowed;
+they can be ill-conditioned. The extension is additive: the existing `new`
+constructor and the P0-P2 examples and tests are unchanged.
 
 ### Raffinement uniforme Q1
 
@@ -269,7 +293,7 @@ cargo run --example affine_constraints
 
 `constraints::AffineConstraints` permet de définir `xᵢ = gᵢ + Σⱼ aᵢⱼ xⱼ`, avec dépendances entre degrés de liberté contraints. `close` développe ces dépendances sans récursion, détecte les cycles et fixe l’ordre croissant des degrés de liberté libres. `ClosedConstraints::condense` construit `Cᵀ A C` et `Cᵀ(b − A g)` pour `x = C y + g`, puis `reconstruct` retrouve `x`. Les contraintes de Dirichlet sont des relations sans maître. Si tous les degrés de liberté sont contraints, le système réduit est 0×0 : reconstruire avec `[]` sans appeler le solveur.
 
-L’exemple assemble **explicitement**, cellule par cellule, un petit patch avec un nœud pendant ; les valeurs de bord et la relation du milieu sont fournies manuellement. Il vérifie la continuité de la trace pour une solution affine. Le module est purement algébrique : les API `Mesh2` existantes supposent un maillage conforme. Le type spécialisé `NonconformingRefinement` construit automatiquement les relations d’un seul niveau à partir d’un parent conforme ; il ne fournit pas de gestion générale des interfaces ou contraintes à travers plusieurs niveaux. Un système SPD donne une réduction SPD en arithmétique exacte, mais ni SPD ni conditionnement ne sont vérifiés. Le développement des contraintes et le produit creux peuvent entraîner du remplissage et un coût mémoire important ; les débordements détectés sont signalés.
+L’exemple assemble **explicitement**, cellule par cellule, un petit patch avec un nœud pendant ; les valeurs de bord et la relation du milieu sont fournies manuellement. Il vérifie la continuité de la trace pour une solution affine. Le module est purement algébrique : les API `Mesh2` existantes supposent un maillage conforme. `NonconformingRefinement::hanging_constraints` builds midpoint rules from a conforming parent or from any level reached by `refine`; `AffineConstraints::close` composes rules across levels. It does not provide general interface discovery on an arbitrary mesh. Un système SPD donne une réduction SPD en arithmétique exacte, mais ni SPD ni conditionnement ne sont vérifiés. Le développement des contraintes et le produit creux peuvent entraîner du remplissage et un coût mémoire important ; les débordements détectés sont signalés.
 
 ## Comparaison et mesures exploratoires
 
@@ -277,8 +301,8 @@ Le [protocole Q1 deal.II](comparison/dealii_q1/README.md) prépare une comparais
 
 ## Périmètre et validation
 
-- Implémentés : points 2D/3D, triangles et tétraèdres P1, quadrilatères Q1, maillages structurés, mappings affine et bilinéaire, quadratures, assemblage Poisson et diffusion-réaction anisotrope P1 triangulaire et tétraédrique et Q1, Dirichlet, Neumann mixte ou pur normalisé, COO/CSR, CG avec estimation initiale et préconditionnement Jacobi optionnels, réduction algébrique par contraintes affines, export VTK, import de sous-ensembles Gmsh 4.1 et 2.2 ASCII, raffinement uniforme, local triangulaire conforme et non conforme sur un niveau, indicateur résiduel Poisson limité et opérations sur champs P1 et Q1.
-- Limités au calcul séquentiel scalaire ; pas encore de raffinement local Q1 ou 3D, de gestion multiniveau des hanging nodes, de MPI, de Trilinos, autres familles d’éléments que P1/Q1 ou prise en charge complète de Gmsh. Le parcours 3D utilise des tétraèdres P1 ; le solveur Neumann pur anisotrope ne traite pas de réaction. La validation de `Mesh2::new` ne détecte pas les intersections géométriques ni tous les cas non conformes : le maillage fourni doit être conforme.
+- Implémentés : points 2D/3D, triangles et tétraèdres P1, quadrilatères Q1, maillages structurés, mappings affine et bilinéaire, quadratures, assemblage Poisson et diffusion-réaction anisotrope P1 triangulaire et tétraédrique et Q1, Dirichlet, Neumann mixte ou pur normalisé, COO/CSR, CG avec estimation initiale et préconditionnement Jacobi optionnels, réduction algébrique par contraintes affines, export VTK, import de sous-ensembles Gmsh 4.1 et 2.2 ASCII, raffinement uniforme, local triangulaire conforme, multi-level non-conforming refinement with selective coarsening, indicateur résiduel Poisson limité et opérations sur champs P1 et Q1.
+- Limités au calcul séquentiel scalaire ; pas encore de raffinement local Q1 ou 3D, de MPI, de Trilinos, autres familles d’éléments que P1/Q1 ou prise en charge complète de Gmsh. Le parcours 3D utilise des tétraèdres P1 ; le solveur Neumann pur anisotrope ne traite pas de réaction. La validation de `Mesh2::new` ne détecte pas les intersections géométriques ni tous les cas non conformes : le maillage fourni doit être conforme.
 - Aucune dépendance Cargo externe. Rust 1.70 est la version minimale **cible**, configurée dans la CI avec la version stable. Les deux configurations ont réussi sur le commit `e2e8734` ; les modifications locales ultérieures ne sont pas couvertes par cette exécution.
 - Les tests couvrent les matrices locales et globales, les coefficients elliptiques et données invalides, le solveur, les normales, les conditions mixtes et Neumann pur 2D/3D, l’import et les marqueurs Gmsh, le raffinement et le transfert P1/Q1 en 2D et P1 en 3D, les indicateurs analytiques, l’interpolation, la projection et l’évaluation ponctuelle, les mappings et patch tests Q1 et tétraédriques, ainsi que la convergence des solutions manufacturées. Le fichier VTK a aussi été lu avec `meshio` lors d’une vérification locale.
 

@@ -53,4 +53,12 @@ Les fichiers amont cités sont des repères fonctionnels représentatifs, pas un
 
 **Champs P1 tétraédriques :** `tetra_field` fournit interpolation nodale, matrice de masse consistante et projection L² ; `tetra::interpolate_boundary` traite les faces de bord. La recherche et l’évaluation ponctuelle 3D sont disponibles par balayage : la tolérance barycentrique peut conduire à une extrapolation. Voir le README pour la quadrature et le conditionnement.
 
-**Poisson non conforme limité :** `grid::NonconformingRefinement::assemble_poisson` assemble les termes volumiques sur un unique niveau dérivé d’un parent conforme ; `hanging_constraints` fournit les relations P1. Les routines usuelles de frontière, les estimateurs et les conditions de Neumann ne prennent pas en charge cet objet.
+**Multi-level non-conforming Poisson:** `grid::NonconformingRefinement::assemble_poisson`
+assembles the P1 volume terms of `-Δu=f` on any active level, including meshes
+built by successive `refine` calls or stored in `NonconformingRefinementHistory`.
+`hanging_constraints` emits midpoint rules for every hanging node, including
+those at different levels; `AffineConstraints::close` composes the chains before
+`condense` and `reconstruct`. Dirichlet values come from `interpolate_boundary`.
+`examples/poisson_nonconforming_adaptive.rs` demonstrates a two-level
+mark/refine/solve/coarsen cycle. The usual `Mesh2` boundary routines, residual
+estimators and Neumann integration still do not support this seam.

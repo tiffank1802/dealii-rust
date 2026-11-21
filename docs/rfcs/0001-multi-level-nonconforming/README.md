@@ -1,12 +1,13 @@
 ---
 id: RFC-0001
-status: draft
-revision: 4
+status: accepted
+revision: 5
 created: 2026-11-21
-decided: null
+decided: 2026-11-21
+amended: 2026-11-21
 author: carter-maestro
-adr: null
-plan: null
+adr: ADR-0004
+plan: 001-multi-level-nonconforming
 supersedes: []
 ai-usage: ai-assisted
 tags: [adaptivity, refinement, nonconforming, hanging-nodes]
@@ -14,8 +15,10 @@ tags: [adaptivity, refinement, nonconforming, hanging-nodes]
 
 # RFC-0001: Multi-level non-conforming refinement and selective derefinement
 
-**Status:** Draft
-**Revision:** 4
+**Status:** Accepted
+**Revision:** 5
+**Amended:** 2026-11-21 (implementation-review amendment, see
+[decision-2026-11-21.md](decision-2026-11-21.md))
 **Author:** carter-maestro
 
 ## Summary
@@ -25,8 +28,10 @@ Extend the existing one-level triangular non-conforming refinement
 non-conforming meshes with hanging nodes, plus **selective derefinement**, while
 keeping the crate serial, zero-dependency and `forbid(unsafe_code)`. This moves
 the project beyond the P0-P2 scope defined in ADR-0001 and therefore requires
-this RFC. Revision 3 resolves all blocking items from the Round 1 and Round 2
-reviews.
+this RFC. Revisions 1–4 resolved the Round 1–4 design reviews; revision 5
+amends the parent-cell/level and coarsening-midpoint contracts found during
+implementation review (2026-11-21). The accepted Option C direction, the data
+model and all public signatures are unchanged.
 
 ## Problem
 
@@ -53,11 +58,19 @@ Introduce a new grid-seam type `NonconformingMesh` (additive, does not replace
 
 - `vertices: Vec<Point2>` — all vertices (original + midpoints), compacted.
 - `cells: Vec<[VertexId; 3]>` — **active (leaf) cells only** (flattened list).
-- `parent_cells: Vec<CellId>` — per active cell, its parent cell in the previous
-  level; self (the cell's own id) for original/root cells. **Keeps the existing
-  `Vec<CellId>` convention** (`src/nonconforming_refinement.rs:47`) so the
-  `parent_cell(child) -> Result<CellId>` accessor and its tests are unchanged.
-  `None` is **not** used; roots are self-parents.
+- `parent_cells: Vec<CellId>` — per active cell, the `CellId` of the **source
+  cell in the mesh that produced this level**: for `new`, the index in the
+  input `Mesh2`; for `refine`, the index in `self.mesh.cells`; for `coarsen`,
+  the parent-level group index recorded in the transition's `children`. This
+  keeps the existing `Vec<CellId>` convention so the frozen
+  `parent_cell(child) -> Result<CellId>` accessor, its P0-P2 physical-tag
+  lookups and its tests are unchanged (`src/nonconforming_refinement.rs:96`,
+  `tests/nonconforming_refinement.rs:96,225`). `None` is not used. **These ids
+  are opaque, level-scoped provenance tokens.** They are *not* self-parent
+  pointers (a carried root keeps its index in the input mesh, which generally
+  differs from its index in the active list), *not* a cell level, and must not
+  be used for level comparisons or to index another level's cell list. See
+  §3 for the actual interface rule.
 - `edge_splits: BTreeMap<(VertexId, VertexId), VertexId>` — canonical (sorted)
   vertex-pair → midpoint vertex, for every split edge at every level. Single
   source of truth for "is this edge split, and by which vertex".
@@ -65,14 +78,22 @@ Introduce a new grid-seam type `NonconformingMesh` (additive, does not replace
   two masters. An edge may carry several midpoints (level difference > 1).
 - `boundary_edges: Vec<[VertexId; 2]>` — exterior edge vertex pairs only.
   Interface edges are **never** boundary edges.
-- `boundary_parents: Vec<Option<CellId>>` — per boundary edge, the active cell
-  that owns it (or `None` if orphaned). Needed by `boundary_edge_geometry`.
-  Note: this is distinct from `parent_boundary_edge` (a transition-level field
-  retained in `NonconformingRefinement` that maps a boundary edge to its parent
-  level's boundary edge id); `boundary_parents` is mesh-level ownership only.
-- A cell's **refinement level** is its depth from the root mesh (root cells =
-  level 0). A transition's level = parent level + 1. Stored per transition in
-  `NonconformingRefinementHistory`, not in `NonconformingMesh`.
+- The transition-level parent-edge map is named `parent_boundary_edges:
+  Vec<BoundaryEdgeId>` — transition-only, retained in `NonconformingRefinement`
+  and mapped by the accessor `parent_boundary_edge(child) ->
+  Result<BoundaryEdgeId>`. The mesh-level owning-cell field of the earlier
+  one-level draft is not part of this design: `boundary_edge_geometry` needs
+  the oriented exterior edge, which the transition retains
+  (`oriented_boundary_edges`), so the owning-cell field is dropped as unused
+  (YAGNI).
+- **No per-cell level is stored or derived.** Interface detection (§3) uses
+  `edge_splits` plus active-cell edge incidence, not a cell level; the
+  `parent_cells` chain is provenance only and cannot yield a level (a carried
+  root may point at an earlier cell that is not its own active-list index).
+  A transition's ordinal level is its history step index in
+  `NonconformingRefinementHistory`; this is an operation counter, not a
+  property of any cell. Cells of one mesh may have different effective depths
+  under unbalanced refinement (§5), and no depth value is computed anywhere.
 - `boundary_vertices: Vec<VertexId>` — exterior vertices (for `boundary_vertices()`).
 - `original_vertices: usize` — count of level-0 vertices, for provenance/tests.
 - `midpoint_parents: BTreeMap<VertexId, (VertexId, VertexId)>` — per midpoint
@@ -98,22 +119,40 @@ vertex when the key is absent. This is what makes constraint composition across
 levels possible: a midpoint created at level *k* keeps its index at level *k+1*.
 Reuse the existing `edge_key` helper (`src/nonconforming_refinement.rs:10-16`).
 
+The split level is deliberately not stored: vertex reuse is key-based and
+coarsening drops by midpoint identity, so a stored level could go stale.
+Midpoint *provenance for coarsening* is recorded separately on the transition
+in `introduced_midpoints` (§8); `edge_splits` itself holds only the current
+midpoint for each key.
+
 ### 3. Interface / hanging-edge discovery (blocking item 1, 5)
 
-An edge (canonical vertex pair) is **interface** iff the two active cells that
-share it are at different refinement levels. Concretely, during `refine`:
+`edge_splits` is the single source of truth for interface detection. An edge
+(canonical vertex pair) is **interface** iff its key is present in `edge_splits`
+**and** the unsplit key still occurs among the edges of at least one active
+cell. No cell level, `parent_cells` chain, or marking comparison is consulted.
+Concretely, during `refine` (and again after `coarsen`, §8):
 
 1. Build an edge→cell-incidence map: for each active cell, for each of its 3
    edges (canonical key), append the cell's id to that edge's list.
-2. An edge with exactly 2 incident active cells at different levels (one
-   refined this step, one not) is an interface edge.
-3. For each interface edge, if its key is in `edge_splits`, its midpoint is a
-   hanging node: emit one `HangingNode { slave: midpoint, masters: (v0, v1) }`.
-   If an edge carries several midpoints (level difference > 1), each sub-edge
-   key in `edge_splits` is tested independently and emits its own `HangingNode`.
+2. An edge is an interface root iff `edge_splits.contains_key(edge)` and the
+   edge occurs in that incidence map. This one rule covers both newly created
+   interfaces and **pre-existing interfaces** whose cells were not marked this
+   step: their midpoint remains in `edge_splits`, so they are re-tested and
+   their `HangingNode`s re-emitted automatically. An interface disappears once
+   both sides are refined and the unsplit key is no longer an active-cell edge,
+   even though the midpoint stays in `edge_splits` for reuse (§2).
+3. For each interface edge, walk its split sub-edge keys in `edge_splits`
+   (iteratively, with a visited set): emit one `HangingNode` per split key
+   found. An edge may carry several midpoints (level difference > 1); each
+   sub-edge key is tested independently.
 
-Edges with 0 or 1 incident cells are boundary edges (never interface).
-Edges with 2 incident cells at the **same** level are interior (no hanging node).
+Edges with 0 or 1 incident active cells are boundary edges (never interface;
+exterior splitting is handled by the retained oriented boundary edges).
+Edges with 2 incident active cells whose key is absent from `edge_splits` are
+interior (no hanging node). The discovery procedure is shared by `refine` and
+`coarsen` so a pre-existing interface reappears when both sides become coarse
+again.
 
 ### 4. Active-cell model (blocking item 5)
 
@@ -140,7 +179,11 @@ signature. Additively, a constructor
 `DofHandler::from_vertex_count(n: usize) -> Self` is added for callers that
 only have a vertex count; `cell_dofs`/`boundary_dofs` are **not** available for
 nonconforming meshes via this constructor (callers use the vertex-indexed
-numbering directly). Existing `DofHandler::new(&Mesh2)` is unchanged.
+numbering directly). Existing `DofHandler::new(&Mesh2)` is unchanged. Storage
+shape is the implementer's choice: the current `DofHandler<'a>` borrows
+`&Mesh2` (`src/dofs.rs:18-20`), so a count-only constructor implies an
+owned-count or `Option<&Mesh2>` variant; the contract — no
+`cell_dofs`/`boundary_dofs` via this constructor — is fixed.
 
 ### 7. Constraint composition (no recursion)
 
@@ -154,13 +197,32 @@ structural changes, matching the immutable refinement types).
 ### 8. Selective derefinement (`coarsen`)
 
 - Input: `&self` + `marked: &[CellId]` (active cells to coarsen).
+- Each transition records midpoint provenance in a private field
+  `introduced_midpoints: BTreeMap<CellId, BTreeSet<VertexId>>` on
+  `NonconformingRefinement` (never in `edge_splits` or in `NonconformingMesh`).
+  For a refined sibling group `p`, the set contains the `VertexId`s of the
+  midpoints **newly created** while refining `p`: exactly the midpoints of the
+  group's three canonical edge keys that were **absent** from `edge_splits` at
+  the start of that transition. A midpoint reused from an earlier level (§2)
+  is deliberately **excluded**, even when both of its masters happen to be
+  vertices of the sibling group. A midpoint introduced for an edge shared by
+  two marked groups belongs to both groups' sets. This is a level-free,
+  index-based provenance record; no split level is stored anywhere.
+- The candidate removal set for a restored group is its `introduced_midpoints`
+  entry. A midpoint is **never** selected for removal by inspecting
+  `midpoint_parents` master membership within the group's vertices: that
+  heuristic misclassifies a reused interface midpoint and would reject a legal
+  derefinement (the level-1 interface midpoint reused when the coarse neighbour
+  is refined in the next level). After all selected groups are collapsed,
+  midpoints that have become geometrically unused are additionally removed by
+  the orphan cascade below (this also removes nested sub-edge midpoints).
 - A parent is restored **only if** all of the following hold:
   1. all its children are in `marked`;
   2. none of those children has descendants;
-  3. no surviving active cell references any of the children's midpoints as an
-     ordinary vertex;
-  4. no remaining `HangingNode` (as slave or master) references any of those
-     midpoints.
+  3. no surviving active cell references any midpoint in the candidate removal
+     set as an ordinary vertex;
+  4. no remaining `HangingNode` (as slave or master) references any midpoint in
+     the candidate removal set.
 - Operation is **immutable**: returns a new `NonconformingMesh`.
 - **One level per call** (callers loop), matching `RefinementHistory::coarsen_last`.
 - Renumbering: survivors keep their original vertex order; removed midpoints are
@@ -171,7 +233,17 @@ structural changes, matching the immutable refinement types).
   canonical key contains a removed vertex (cascade). Surviving entries retained;
   their vertex indices are remapped to the new compacted indices alongside the
   vertices. Pre-existing interface edges (already split before this coarsening)
-  persist as long as their midpoints survive.
+  persist as long as their midpoints survive; a reused midpoint is not in any
+  later transition's `introduced_midpoints`, so it survives until the
+  introducing transition is undone or the orphan cascade removes it.
+- The returned transition carries the surviving `introduced_midpoints` entries,
+  renumbered with the same vertex compaction map (entries whose midpoint was
+  removed are dropped), so a subsequent coarsen of the coarser mesh keeps the
+  same provenance rule.
+- Hanging nodes of the result are recomputed with the §3 discovery routine on
+  the coarsened active mesh, rather than carried forward by filtering the
+  input's `hanging` list. This restores a pre-existing interface whose midpoint
+  had become inactive while both neighbours were refined at the deeper level.
 
 ### 9. History storage (blocking item 7)
 
@@ -179,19 +251,24 @@ Introduce a **dedicated** `NonconformingRefinementHistory` (additive), mirroring
 `RefinementHistory` (`src/refinement_history.rs`): stores one
 `NonconformingRefinement` (transition) per level, with `refine(marked)`,
 `coarsen_last()`, `level()`, `mesh()` (current level) and `mesh_at(level)`.
-The history stores **transitions** (which retain `midpoint_parents`,
-`oriented_boundary_edges`, `boundary_parents`, `boundary_vertices`,
-`original_vertices`), not bare meshes; `mesh()`/`mesh_at()` expose the
-`NonconformingMesh` view. Do **not** overload `RefinementHistory`, which is
-frozen to `Mesh2`/`LocalRefinement`.
+The history stores **transitions** (which retain `children` / parent→child
+links, `midpoint_parents`, `introduced_midpoints`, `oriented_boundary_edges`,
+`parent_boundary_edges`, `boundary_vertices`, `original_vertices`), not bare
+meshes; `mesh()`/`mesh_at()` expose the `NonconformingMesh` view. Mesh-only
+fields (`edge_splits`, `hanging`, `boundary_edges`, `parent_cells`) are not
+transition-retained; `parent_cells` remains a field of the exposed mesh for the
+frozen accessor, not a level source.
+Do **not** overload `RefinementHistory`, which is frozen to
+`Mesh2`/`LocalRefinement`.
 
 ### 10. Cross-level provenance scoping (blocking item 8)
 
 Parent/child IDs are **level-scoped**: they are meaningful only within one
 transition and are stored in the level-retaining history, not as long-lived
 cross-level identifiers. This respects ADR-0003 §4 (no persistent/path-based IDs
-in P0-P2). The `edge_splits` map is the only cross-level structure, and it
-stores vertex indices, not cell paths.
+in P0-P2). `edge_splits` maps canonical vertex pairs to vertex indices, and
+`introduced_midpoints` maps level-scoped parent `CellId`s to vertex indices;
+both are level-scoped index-based records, never cell paths or persistent IDs.
 
 ### 11. Empty-marking policy (clarification 7)
 
@@ -228,13 +305,18 @@ Tests (names are illustrative; the contract is the assertion):
   `coarsen_rejects_partial_sibling_group`,
   `coarsen_rejects_cell_with_descendants`,
   `coarsen_rejects_neighbor_dependency`,
-  `coarsen_rejects_surviving_vertex_reference`,
+  `coarsen_reused_interface_midpoint_restores_parent` (replaces the earlier
+  `coarsen_rejects_surviving_vertex_reference`: a midpoint reused from an
+  earlier level is not removed, so the legal derefinement must succeed and
+  restore the parent mesh, including its hanging node),
   `prolongate_then_restrict_recovers_parent_field`,
-  `coarsen_invalidates_ids_documented`.
+  `coarsen_invalidates_ids_documented`,
+  `coarsen_children_and_parent_cells_share_index_space`.
 - Deep-level: `deep_refinement_row_width_bounded`,
   `deep_refinement_completes_in_budget` (ignored by default if slow).
 - Edge cases: already-split edge reuse, empty marking, non-finite midpoint,
-  malformed rule rejection, cumulative overflow.
+  malformed rule rejection, cumulative overflow,
+  `mesh_validate_rejects_out_of_range_ids_and_nonfinite_coordinates`.
 
 ## Alternatives considered
 
@@ -264,6 +346,26 @@ Tests (names are illustrative; the contract is the assertion):
 
 ## Decision
 
-(Filled when accepted/rejected.)
-EOF
-echo done
+**Accepted.** RFC-0001 revision 5, **Option C** — multi-level with
+index-based IDs + a dedicated `NonconformingRefinementHistory` — is accepted
+as **ADR-0004** on 2026-11-21 (amended 2026-11-21)
+([ADR-0004](../adr/0004-multi-level-nonconforming.md)).
+
+Brief rationale: the adaptive loop (estimate → mark → refine → solve →
+coarsen) requires a multi-level mesh and selective derefinement; the work is
+additive per ADR-0003 §3 and expands the P0-P2 scope per ADR-0001. Vertex
+reuse via the canonical `edge_splits` key map composes constraints across
+levels through the existing iterative `AffineConstraints::close`; level-scoped
+IDs keep cross-level provenance inside the history, per ADR-0003 §4.
+
+Round 4 residual clarifications were folded into revision 4 (split level not
+stored, transition level is the history step index, `parent_boundary_edges`
+naming, parent→child links in §9, `DofHandler::from_vertex_count` storage
+note). Revision 5 amends two implementation-review defects without changing
+this decision or any signature: (1) interface detection is now defined solely
+by `edge_splits` and active-cell incidence — there is no derived cell level,
+and `parent_cells` is documented as opaque P0-P2 provenance (§1, §3); (2)
+coarsening selects removed midpoints via the private per-transition
+`introduced_midpoints` map, so reused interface midpoints survive (§2, §8, §9).
+See [decision-2026-11-21.md](decision-2026-11-21.md) for rationale and exact
+implementation instructions.

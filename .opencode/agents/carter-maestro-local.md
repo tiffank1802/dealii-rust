@@ -1,7 +1,7 @@
 ---
 description: "Carter's orchestrator — analyzes requests and routes to the right specialist agent."
 mode: primary
-model: opencode/tidepool-alpha-free
+model: opencode/big-pickle
 permissions:
 - action: '*'
   resource: '*'

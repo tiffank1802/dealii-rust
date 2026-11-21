@@ -48,4 +48,19 @@ Le raffinement uniforme `UniformRefinement` conserve les indices des anciens som
 
 **Raffinement local triangulaire :** `grid::LocalRefinement` découpe les cellules marquées en quatre et adapte leurs voisines aux arêtes coupées, sans hanging nodes. Relations parentales et transfert P1 sont disponibles pour un niveau. `RefinementHistory` conserve une pile de niveaux et permet le retrait du dernier niveau complet avec restriction nodale par injection ; pas de coarsening sélectif, de génération automatique de contraintes affines ni de garantie de qualité sur raffinements répétés.
 
-**Un niveau non conforme P1 :** `grid::NonconformingRefinement` raffine les cellules marquées sans fermeture conforme, déduit les nœuds pendants de la connectivité parentale et reconstruit la frontière depuis le parent ; l’assemblage volumique Poisson et les contraintes P1 sont spécialisés. Pas de multiniveau, Neumann ou détection générale sur un maillage externe. Ne pas convertir cette connectivité en `Mesh2`.
+**Multi-level non-conforming P1:** `grid::NonconformingMesh` is the additive
+mesh view: active (leaf) cells only, parent provenance, the canonical
+`edge_splits` midpoint map, hanging nodes and exterior boundary data.
+`grid::NonconformingRefinement` wraps it; its `new(parent, marked)` constructor
+still produces one level from a conforming `Mesh2`, while `refine(marked)` adds
+further levels (reusing split-edge midpoints) and `coarsen(marked)` selectively
+restores fully marked sibling groups, one level per call.
+`grid::NonconformingRefinementHistory` retains all levels with `refine`,
+`coarsen_last`, `level`, `mesh` and `mesh_at`. Hanging-node relations from every
+level are emitted by `hanging_constraints` and composed by
+`AffineConstraints::close`. Unbalanced level differences are allowed but can be
+ill-conditioned. See `examples/poisson_nonconforming_adaptive.rs` for a complete
+mark/refine/solve/coarsen flow. The mesh is not convertible to `Mesh2` (its
+boundary detection would treat coarse/fine interfaces as exterior edges);
+Neumann integration, point location, residual estimators, general elliptic
+assembly and geometric detection of arbitrary hanging nodes remain out of scope.
