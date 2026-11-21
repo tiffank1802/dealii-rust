@@ -2,11 +2,13 @@
 //!
 //! The marker is deterministic: a patch of cells is refined from the conforming
 //! parent, then one isolated cell is refined a second time. The solve uses the
-//! hanging-node constraints composed across both levels, and a final selective
-//! coarsening restores that cell from its four children. This is an additive
-//! example; the one-level `poisson_hanging` example is untouched.
+//! hanging-node constraints composed across both levels. The final section
+//! attempts to coarsen that cell's four children and reports the documented
+//! safety-guard rejection: its unrefined neighbours still reference the newly
+//! introduced midpoints (RFC-0001 §8). This is an additive example; the
+//! one-level `poisson_hanging` example is untouched.
 //!
-//! A separate, independent section then drives the RFC-0002 estimator loop:
+//! A separate, independent section drives the RFC-0002 estimator loop:
 //! solve → estimate → mark the bulk fraction → refine, with a fixed cycle
 //! budget. Only refinement is indicator-driven; see `run_estimator_loop` for
 //! why coarsening cannot be driven by an indicator alone.
@@ -39,8 +41,10 @@ fn edge_is_split(mesh: &NonconformingRefinement, cell: &[VertexId; 3]) -> bool {
 }
 
 /// Pick the cell closest to `(target_x, target_y)` whose edges have not been
-/// split at an earlier level. Refining such a cell introduces new midpoints
-/// that no neighbour uses, so its sibling group can be coarsened again.
+/// split at an earlier level. Refining such a cell introduces new midpoints;
+/// its unrefined neighbours then use them as hanging nodes, so its sibling
+/// group cannot be coarsened until those neighbours are restored as well
+/// (RFC-0001 §8).
 fn isolated_cell(mesh: &NonconformingRefinement, target_x: f64, target_y: f64) -> Vec<CellId> {
     let mut best: Option<(usize, f64)> = None;
     for (i, cell) in mesh.cells().iter().enumerate() {
@@ -219,15 +223,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         max_hanging_error,
     );
 
-    // Selective coarsening: restore the parent of the four level-2 children.
-    // All IDs come from `level2`; the returned mesh has its own numbering.
+    // Coarsening guard (RFC-0001 §8): these four children own the midpoints
+    // introduced at level 2. Their unrefined neighbours still reference those
+    // midpoints as hanging nodes, so restoring the parent must be refused.
+    // All IDs come from `level2`; the rejection is the intended result.
     let children: Vec<CellId> = level2.children(*target)?.to_vec();
-    let coarsened = level2.coarsen(&children)?;
-    println!(
-        "coarsened: cells={} vertices={} hanging={}",
-        coarsened.cells().len(),
-        coarsened.vertices().len(),
-        coarsened.hanging_nodes().len()
-    );
+    match level2.coarsen(&children) {
+        Ok(_) => return Err("expected coarsening to be rejected by a neighbour dependency".into()),
+        Err(err) if err.0 == "hanging node references a removed midpoint" => println!(
+            "coarsen correctly rejected: {} -- neighbour still references a midpoint (RFC-0001 §8)",
+            err
+        ),
+        Err(err) => return Err(format!("unexpected coarsening error: {err}").into()),
+    }
     Ok(())
 }
