@@ -13,6 +13,7 @@ use std::io::Read;
 
 use crate::base::Point2;
 use crate::grid::{BoundaryEdgeId, CellId, Mesh2, VertexId};
+use crate::quad::QuadMesh;
 use crate::{error, Error, Result};
 
 #[path = "gmsh22.rs"]
@@ -127,6 +128,114 @@ impl ImportedMesh {
     }
 }
 
+/// A quadrilateral mesh and physical-group metadata aligned with its vertex,
+/// cell and boundary-edge IDs. IDs must be used with the mesh in this object
+/// only. This mirrors [`ImportedMesh`] but wraps a [`QuadMesh`].
+#[derive(Debug, Clone)]
+pub struct ImportedQuadMesh {
+    mesh: QuadMesh,
+    node_tags: Vec<u64>,
+    vertex_groups: Vec<Vec<u64>>,
+    cell_groups: Vec<Vec<u64>>,
+    cell_element_tags: Vec<u64>,
+    boundary_groups: Vec<Vec<u64>>,
+    boundary_element_tags: Vec<Option<u64>>,
+    physical_names: BTreeMap<(u8, u64), String>,
+}
+
+impl ImportedQuadMesh {
+    pub fn mesh(&self) -> &QuadMesh {
+        &self.mesh
+    }
+    /// Original Gmsh node tag for this vertex; tags need not be contiguous.
+    pub fn node_tag(&self, id: VertexId) -> Result<u64> {
+        self.node_tags
+            .get(id.0)
+            .copied()
+            .ok_or_else(|| error("vertex index out of bounds"))
+    }
+    /// Physical tags from a point entity (4.1) or point element at this vertex.
+    pub fn vertex_physical_tags(&self, id: VertexId) -> Result<&[u64]> {
+        self.vertex_groups
+            .get(id.0)
+            .map(Vec::as_slice)
+            .ok_or_else(|| error("vertex index out of bounds"))
+    }
+    /// Physical tags of the quadrilateral: its entity groups in 4.1.
+    pub fn cell_physical_tags(&self, id: CellId) -> Result<&[u64]> {
+        self.cell_groups
+            .get(id.0)
+            .map(Vec::as_slice)
+            .ok_or_else(|| error("cell index out of bounds"))
+    }
+    /// Original Gmsh element tag for a quadrilateral.
+    pub fn cell_element_tag(&self, id: CellId) -> Result<u64> {
+        self.cell_element_tags
+            .get(id.0)
+            .copied()
+            .ok_or_else(|| error("cell index out of bounds"))
+    }
+    /// Original Gmsh line-element tag, or `None` if the boundary edge was not listed.
+    pub fn boundary_element_tag(&self, id: BoundaryEdgeId) -> Result<Option<u64>> {
+        self.boundary_element_tags
+            .get(id.0)
+            .copied()
+            .ok_or_else(|| error("boundary edge index out of bounds"))
+    }
+    /// Physical tags of the corresponding boundary line element. An empty
+    /// list can mean either no line element or an untagged line element; use
+    /// `boundary_element_tag` to distinguish those cases.
+    pub fn boundary_physical_tags(&self, id: BoundaryEdgeId) -> Result<&[u64]> {
+        self.boundary_groups
+            .get(id.0)
+            .map(Vec::as_slice)
+            .ok_or_else(|| error("boundary edge index out of bounds"))
+    }
+    /// Find boundary edges belonging to a physical curve group.
+    pub fn boundary_edges_with_tag(&self, tag: u64) -> Vec<BoundaryEdgeId> {
+        self.boundary_groups
+            .iter()
+            .enumerate()
+            .filter_map(|(i, tags)| {
+                if tags.contains(&tag) {
+                    Some(BoundaryEdgeId(i))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+    /// Find quadrilaterals belonging to a physical surface group.
+    pub fn cells_with_tag(&self, tag: u64) -> Vec<CellId> {
+        self.cell_groups
+            .iter()
+            .enumerate()
+            .filter_map(|(i, groups)| {
+                if groups.contains(&tag) {
+                    Some(CellId(i))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+    /// Unique vertices of boundary line elements belonging to a physical group.
+    pub fn boundary_vertices_with_tag(&self, tag: u64) -> Vec<VertexId> {
+        self.boundary_edges_with_tag(tag)
+            .into_iter()
+            .flat_map(|id| self.mesh.boundary_edges()[id.0].iter().copied())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+    /// Name from `$PhysicalNames`, if one was declared for dimension and tag.
+    pub fn physical_name(&self, dimension: u8, tag: u64) -> Option<&str> {
+        self.physical_names
+            .get(&(dimension, tag))
+            .map(String::as_str)
+    }
+}
+
 /// Read MSH 4.1 ASCII text. Files with unsupported sections, cell types or
 /// geometry are rejected; see the module documentation for the subset.
 pub fn read<R: Read>(mut input: R) -> Result<ImportedMesh> {
@@ -176,6 +285,68 @@ pub fn parse(input: &str) -> Result<ImportedMesh> {
         boundary_element_tags[*index] = Some(tag);
     }
     Ok(ImportedMesh {
+        mesh,
+        node_tags: nodes.tags,
+        vertex_groups: elements.vertex_groups,
+        cell_groups: elements.cell_groups,
+        cell_element_tags: elements.cell_element_tags,
+        boundary_groups,
+        boundary_element_tags,
+        physical_names: names,
+    })
+}
+
+/// Read MSH 4.1 ASCII text into a quadrilateral mesh. Only type-3
+/// (quadrilateral) cells are accepted.
+pub fn read_msh41_quads<R: Read>(mut input: R) -> Result<ImportedQuadMesh> {
+    let mut content = String::new();
+    input
+        .read_to_string(&mut content)
+        .map_err(|e| Error(format!("Gmsh read error: {}", e)))?;
+    parse_msh41_quads(&content)
+}
+
+/// Parse MSH 4.1 ASCII text into a quadrilateral mesh. Only type-3
+/// (quadrilateral) cells are accepted; triangles, points-only meshes and
+/// other element types are rejected.
+pub fn parse_msh41_quads(input: &str) -> Result<ImportedQuadMesh> {
+    let sections = split_sections(input)?;
+    let format = required(&sections, "MeshFormat")?;
+    let mut format_tokens = format.split_whitespace();
+    if format_tokens.next() != Some("4.1")
+        || format_tokens.next() != Some("0")
+        || format_tokens.next() != Some("8")
+        || format_tokens.next().is_some()
+    {
+        return Err(error(
+            "only Gmsh MSH 4.1 ASCII with data size 8 is supported",
+        ));
+    }
+    let names = match sections.get("PhysicalNames") {
+        Some(text) => physical_names(text)?,
+        None => BTreeMap::new(),
+    };
+    let entities = parse_entities(required(&sections, "Entities")?)?;
+    let nodes = parse_nodes(required(&sections, "Nodes")?, &entities)?;
+    let elements = parse_elements_quads(required(&sections, "Elements")?, &entities, &nodes)?;
+    let mesh = QuadMesh::new(nodes.points, elements.cells)
+        .map_err(|e| Error(format!("invalid Gmsh quadrilateral mesh: {}", e)))?;
+    let mut boundary_groups = vec![Vec::new(); mesh.boundary_edges().len()];
+    let mut boundary_element_tags = vec![None; mesh.boundary_edges().len()];
+    let boundary_lookup: BTreeMap<_, _> = mesh
+        .boundary_edges()
+        .iter()
+        .enumerate()
+        .map(|(i, edge)| ((edge[0], edge[1]), i))
+        .collect();
+    for (edge, (tag, groups)) in elements.lines {
+        let index = boundary_lookup
+            .get(&edge)
+            .ok_or_else(|| error("Gmsh line element is not an exterior mesh edge"))?;
+        boundary_groups[*index] = groups;
+        boundary_element_tags[*index] = Some(tag);
+    }
+    Ok(ImportedQuadMesh {
         mesh,
         node_tags: nodes.tags,
         vertex_groups: elements.vertex_groups,
@@ -581,6 +752,110 @@ fn parse_elements(text: &str, entities: &Entities, nodes: &Nodes) -> Result<Elem
     t.end()?;
     check_range("Elements", min, max, &all, expected)?;
     Ok(Elements {
+        cells,
+        cell_groups,
+        cell_element_tags,
+        lines,
+        vertex_groups,
+    })
+}
+
+struct QuadElements {
+    cells: Vec<[VertexId; 4]>,
+    cell_groups: Vec<Vec<u64>>,
+    cell_element_tags: Vec<u64>,
+    lines: BTreeMap<(VertexId, VertexId), (u64, Vec<u64>)>,
+    vertex_groups: Vec<Vec<u64>>,
+}
+
+fn parse_elements_quads(text: &str, entities: &Entities, nodes: &Nodes) -> Result<QuadElements> {
+    let mut t = Tokens::new(text, "Elements");
+    let blocks: usize = t.take("block count")?;
+    let expected: usize = t.take("element count")?;
+    let min: u64 = t.take("minimum element tag")?;
+    let max: u64 = t.take("maximum element tag")?;
+    let mut all = BTreeSet::new();
+    let mut cells = Vec::new();
+    let mut cell_groups = Vec::new();
+    let mut cell_element_tags = Vec::new();
+    let mut lines = BTreeMap::new();
+    let mut vertex_groups = nodes.vertex_groups.clone();
+    let mut point_elements = BTreeSet::new();
+    for _ in 0..blocks {
+        let dim: u8 = t.take("entity dimension")?;
+        let entity = positive_tag(&mut t, "entity tag")?;
+        let kind: u32 = t.take("element type")?;
+        let count: usize = t.take("block element count")?;
+        let groups = entities
+            .get(&(dim, entity))
+            .ok_or_else(|| error("Elements: unknown entity"))?;
+        let nnodes = match (dim, kind) {
+            (0, 15) => 1,
+            (1, 1) => 2,
+            (2, 3) => 4,
+            _ => {
+                return Err(Error(format!(
+                    "Elements: unsupported dimension {} / element type {}",
+                    dim, kind
+                )))
+            }
+        };
+        if count > expected.saturating_sub(all.len()) {
+            return Err(error("Elements: block exceeds declared element count"));
+        }
+        for _ in 0..count {
+            let tag = positive_tag(&mut t, "element tag")?;
+            if !all.insert(tag) {
+                return Err(error("Elements: duplicate element tag"));
+            }
+            let mut vertices = Vec::new();
+            for _ in 0..nnodes {
+                let node = positive_tag(&mut t, "element node tag")?;
+                vertices.push(
+                    *nodes
+                        .lookup
+                        .get(&node)
+                        .ok_or_else(|| Error(format!("Elements: unknown node {}", node)))?,
+                );
+            }
+            match (dim, kind) {
+                (0, 15) => {
+                    let vertex = vertices[0];
+                    if nodes.node_entities[vertex.0] != (dim, entity) {
+                        return Err(error("Elements: point node belongs to a different entity"));
+                    }
+                    if !point_elements.insert(vertex) {
+                        return Err(error("Elements: duplicate point element"));
+                    }
+                    for &group in groups {
+                        if !vertex_groups[vertex.0].contains(&group) {
+                            vertex_groups[vertex.0].push(group);
+                        }
+                    }
+                }
+                (1, 1) => {
+                    let a = vertices[0];
+                    let b = vertices[1];
+                    if a == b {
+                        return Err(error("Elements: degenerate line element"));
+                    }
+                    let key = if a < b { (a, b) } else { (b, a) };
+                    if lines.insert(key, (tag, groups.clone())).is_some() {
+                        return Err(error("Elements: duplicate line element"));
+                    }
+                }
+                (2, 3) => {
+                    cells.push([vertices[0], vertices[1], vertices[2], vertices[3]]);
+                    cell_groups.push(groups.clone());
+                    cell_element_tags.push(tag);
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+    t.end()?;
+    check_range("Elements", min, max, &all, expected)?;
+    Ok(QuadElements {
         cells,
         cell_groups,
         cell_element_tags,
