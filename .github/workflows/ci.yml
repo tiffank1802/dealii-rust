@@ -21,6 +21,7 @@ jobs:
       - run: cargo run --example poisson_2d -- 8
       - run: cargo run --example poisson_jacobi -- 8
       - run: cargo run --example benchmark_poisson -- 8 2
+      - run: cargo run --example affine_constraints
       - run: cargo run --example compare_q1_reference -- comparison/dealii_q1/analytic_smoke.txt
       - run: cargo run --example poisson_q1 -- 8
       - run: cargo run --example poisson_q1_mixed -- 8
@@ -34,6 +35,7 @@ jobs:
       - run: cargo run --example poisson_gmsh -- --msh22 tests/fixtures/meshio_square22.msh
       - run: cargo run --example poisson_refinement
       - run: cargo run --example poisson_local_refinement
+      - run: cargo run --example poisson_hanging -- 4
       - run: cargo run --example poisson_q1_refinement
       - run: cargo run --example poisson_3d_refinement
       - run: cargo run --example field_tools

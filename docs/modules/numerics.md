@@ -52,3 +52,5 @@ Les fichiers amont cités sont des repères fonctionnels représentatifs, pas un
 **Champs Q1 :** `quad_field` fournit interpolation nodale, matrice de masse, projection L² et évaluation en coordonnées physiques sur quadrilatères ; la recherche est linéaire et les correspondances par tolérance sont projetées sur le bord. `quad::interpolate_boundary` traite les valeurs de bord. Voir le README pour les limites de quadrature et de conditionnement.
 
 **Champs P1 tétraédriques :** `tetra_field` fournit interpolation nodale, matrice de masse consistante et projection L² ; `tetra::interpolate_boundary` traite les faces de bord. La recherche et l’évaluation ponctuelle 3D sont disponibles par balayage : la tolérance barycentrique peut conduire à une extrapolation. Voir le README pour la quadrature et le conditionnement.
+
+**Poisson non conforme limité :** `grid::NonconformingRefinement::assemble_poisson` assemble les termes volumiques sur un unique niveau dérivé d’un parent conforme ; `hanging_constraints` fournit les relations P1. Les routines usuelles de frontière, les estimateurs et les conditions de Neumann ne prennent pas en charge cet objet.

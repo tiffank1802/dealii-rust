@@ -2,6 +2,7 @@
 
 use crate::base::{triangle_determinant, Point2};
 pub use crate::local_refinement::LocalRefinement;
+pub use crate::nonconforming_refinement::{HangingNode, NonconformingRefinement};
 pub use crate::refinement_history::RefinementHistory;
 use crate::{error, Result};
 use std::collections::{BTreeMap, BTreeSet};

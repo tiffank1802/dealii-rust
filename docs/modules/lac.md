@@ -36,7 +36,7 @@ Les fichiers amont cités sont des repères fonctionnels représentatifs, pas un
 2. `CsrMatrix::mul` vérifie la dimension du vecteur et renvoie une erreur en cas de données invalides. Ne pas imposer qu’une matrice générale soit symétrique.
 3. Pour une valeur Dirichlet `gᵢ`, soustraire `A[j,i]gᵢ` à chaque second membre libre avant de mettre à zéro ligne et colonne, puis poser `A[i,i]=1`, `b[i]=gᵢ`. Traiter simultanément plusieurs indices contraints et tester les répétitions.
 4. CG : initialiser résidu et direction ; contrôler `max_iter`, tolérances, produit de courbure et valeurs finies. Retourner itérations, résidu final et statut ; l’atteinte du budget et une rupture ne sont pas des succès.
-5. En P2, fermer les contraintes affines, détecter les cycles et calculer la forme réduite ; conserver cette mécanique algébrique indépendante de `dofs`.
+5. Les contraintes affines algébriques sont disponibles localement dans `constraints` : fermeture avec détection des cycles, condensation `CᵀAC`, reconstruction et tests ; leur intégration automatique à la topologie non conforme reste à faire.
 
 **Tests ciblés :** CSR avec doublons/lignes vides, multiplication connue, Dirichlet non homogène et contraintes multiples, petit système SPD, second membre nul, dimension erronée, budget épuisé et rupture. Ne pas présenter un test de rupture comme une détection complète de non-SPD.
 

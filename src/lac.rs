@@ -94,6 +94,15 @@ impl CsrMatrix {
         (self.row_ptr.len() as u128 + self.col_idx.len() as u128) * index_bytes
             + self.values.len() as u128 * value_bytes
     }
+    // Internal iterator used after a caller has validated the matrix dimensions.
+    pub(crate) fn row_entries(&self, row: usize) -> impl Iterator<Item = (usize, f64)> + '_ {
+        let start = self.row_ptr[row];
+        let end = self.row_ptr[row + 1];
+        self.col_idx[start..end]
+            .iter()
+            .copied()
+            .zip(self.values[start..end].iter().copied())
+    }
     pub fn get(&self, row: usize, col: usize) -> Result<f64> {
         if row >= self.rows || col >= self.cols {
             return Err(error("matrix index out of bounds"));

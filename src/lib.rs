@@ -5,6 +5,7 @@
 #![forbid(unsafe_code)]
 
 pub mod base;
+pub mod constraints;
 pub mod dofs;
 pub mod elliptic;
 pub mod elliptic_quad;
@@ -21,6 +22,7 @@ pub mod neumann;
 pub mod neumann3d;
 mod neumann_core;
 pub mod neumann_quad;
+mod nonconforming_refinement;
 pub mod numerics;
 pub mod quad;
 pub mod quad_field;

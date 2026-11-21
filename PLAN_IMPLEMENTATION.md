@@ -6,7 +6,7 @@ Pour l’analyse détaillée des 26 modules amont et leurs sous-chantiers, voir 
 
 Construire progressivement une bibliothèque Rust de simulation par éléments finis, inspirée des concepts et des tutoriels de [deal.II](https://www.dealii.org/), avec une API idiomatique, testable et performante. **La parité avec deal.II est un objectif de long terme, pas la définition de la première version.** Une réimplémentation complète implique notamment de nombreuses familles d’éléments, la 3D, le raffinement adaptatif, les problèmes multiphysiques, les solveurs et le calcul distribué.
 
-Le dépôt contient une crate et plusieurs parcours FEM expérimentaux. Le [README](README.md) décrit le périmètre réellement implémenté ; les étapes ci-dessous restent la feuille de route et tous leurs critères complets ne sont pas encore satisfaits. Le commit `8b1e624` a passé la CI Rust stable et 1.70 ; les modifications locales ultérieures ne sont pas couvertes par cette exécution.
+Le dépôt contient une crate et plusieurs parcours FEM expérimentaux. Le [README](README.md) décrit le périmètre réellement implémenté ; les étapes ci-dessous restent la feuille de route et tous leurs critères complets ne sont pas encore satisfaits. Le commit `e2e8734` a passé la CI Rust stable et 1.70 ; les modifications locales ultérieures ne sont pas couvertes par cette exécution.
 
 ### Principes
 
@@ -61,7 +61,7 @@ Ne pas figer dès le départ des traits universels `Mesh`, `Mapping` et `FiniteE
 - Additionner les doublons COO de manière définie lors de la compression CSR ; vérifier bornes, dimensions et cohérence de la matrice.
 - Pour préserver la symétrie nécessaire à CG, éliminer les Dirichlet en modifiant **à la fois lignes, colonnes et second membre** ; tester aussi des valeurs non homogènes avant de les annoncer comme prises en charge.
 - CG exige une matrice symétrique définie positive : documenter cette précondition, fixer tolérance relative/absolue et nombre maximal d’itérations, et renvoyer convergence, résidu, nombre d’itérations ou une erreur explicite en cas de rupture/non-convergence.
-- Pour les contraintes affines futures, exprimer `x = C y + g` et assembler ou condenser le système réduit `CᵀAC y = Cᵀ(b − Ag)` ; prévoir détection des cycles et gestion des dépendances entre contraintes. Les hanging nodes et le raffinement `hp` sont hors MVP.
+- Les contraintes affines algébriques locales expriment `x = C y + g` et condensent `CᵀAC y = Cᵀ(b − Ag)` ; les cycles sont détectés et les dépendances développées. La détection des hanging nodes est disponible pour un niveau issu d’un parent triangulaire conforme ; le cas général et le raffinement `hp` restent hors MVP.
 
 ## 4. Jalons et ordre de réalisation
 
@@ -104,7 +104,7 @@ Chaque jalon doit inclure code, documentation, tests et exemple pertinent ; il n
 
 ### J5 — Robustesse et interopérabilité
 
-**En cours :** les exemples `poisson_mixed` et `poisson_neumann` sont implémentés. Le second contrôle la compatibilité discrète par composante et impose une moyenne intégrale nulle ; l’interopérabilité reste à faire. La CI stable et MSRV 1.70 a réussi sur le commit `8b1e624`, mais ne couvre pas les changements locaux postérieurs.
+**En cours :** les exemples `poisson_mixed` et `poisson_neumann` sont implémentés. Le second contrôle la compatibilité discrète par composante et impose une moyenne intégrale nulle ; l’interopérabilité reste à faire. La CI stable et MSRV 1.70 a réussi sur le commit `e2e8734`, mais ne couvre pas les changements locaux postérieurs.
 
 - Ajouter Dirichlet non homogène à l’exemple et, séparément, des conditions de Neumann ; documenter les conditions de compatibilité et le noyau du cas Neumann pur.
 - Import Gmsh 4.1 et 2.2 ASCII limité implémenté sans dépendance ; étudier les autres variantes et crates existantes (dont `mshio`) avant extension. Tester les allers-retours là où ils sont possibles.
@@ -113,7 +113,7 @@ Chaque jalon doit inclure code, documentation, tests et exemple pertinent ; il n
 
 ### J6 — Maillages et éléments supplémentaires
 
-**En cours :** les parcours Poisson-Dirichlet Q1 2D et P1 tétraédrique 3D expérimentaux sont implémentés avec exemples, tests géométriques et de convergence. Les conditions mixtes et Neumann pur à moyenne intégrale nulle sont traités sur quadrilatères et tétraèdres ; l’assemblage diffusion-réaction anisotrope couvre également Q1 et P1 tétraédrique, avec un solveur Neumann pur pour la diffusion sans réaction sur les trois types de cellules. Interpolation nodale, projection L² et évaluation ponctuelle physique Q1 sont disponibles ; l’interpolation, la projection L² et l’évaluation ponctuelle P1 tétraédriques sont également disponibles localement. La CI stable et MSRV a réussi sur le commit `8b1e624`, mais pas encore sur ces changements locaux ; les extensions (import et autres formulations) restent à faire.
+**En cours :** les parcours Poisson-Dirichlet Q1 2D et P1 tétraédrique 3D expérimentaux sont implémentés avec exemples, tests géométriques et de convergence. Les conditions mixtes et Neumann pur à moyenne intégrale nulle sont traités sur quadrilatères et tétraèdres ; l’assemblage diffusion-réaction anisotrope couvre également Q1 et P1 tétraédrique, avec un solveur Neumann pur pour la diffusion sans réaction sur les trois types de cellules. Interpolation nodale, projection L² et évaluation ponctuelle physique Q1 sont disponibles ; l’interpolation, la projection L² et l’évaluation ponctuelle P1 tétraédriques sont également disponibles. La CI stable et MSRV a réussi sur le commit `e2e8734` ; les contraintes affines et le raffinement non conforme ajoutés ensuite localement ne sont pas encore couverts. Les extensions (import et autres formulations) restent à faire.
 
 - Ajouter Q1 sur quadrilatères, puis tétraèdres P1 en 3D ; traiter explicitement l’ordre local, les orientations, les faces et les mappings non affines lorsque nécessaires.
 - Généraliser les interfaces seulement après identification des points communs et des différences ; conserver les tests de Poisson 2D.
@@ -121,9 +121,9 @@ Chaque jalon doit inclure code, documentation, tests et exemple pertinent ; il n
 
 ### J7 — Adaptativité et éléments d’ordre supérieur
 
-**Amorce expérimentale :** raffinement global conforme en quatre triangles, quatre quadrilatères ou huit tétraèdres, relations parent/enfants à un niveau, transfert P1/Q1 et indicateur résiduel pour Poisson homogène triangulaire. Un raffinement local red-green conforme et le marquage de Dörfler sont ajoutés localement pour les triangles P1 ; une pile persistante de niveaux et le retour d’un niveau complet sont disponibles localement ; aucune sélection de coarsening, contrainte affine ou adaptation locale Q1/3D n’est fournie.
+**Amorce expérimentale :** raffinement global conforme en quatre triangles, quatre quadrilatères ou huit tétraèdres, relations parent/enfants à un niveau, transfert P1/Q1 et indicateur résiduel pour Poisson homogène triangulaire. Un raffinement local red-green conforme, le marquage de Dörfler, une pile persistante de niveaux et le retour d’un niveau complet sont disponibles pour les triangles P1. La réduction algébrique et un raffinement non conforme P1 triangulaire à un niveau avec détection des nœuds pendants depuis le parent sont ajoutés localement ; aucun déraffinement sélectif, traitement non conforme multiniveau ni adaptation locale Q1/3D n’est fourni.
 
-- Définir la hiérarchie de cellules, le marquage, le raffinement et le transfert de solution ; introduire les contraintes affines et les hanging nodes avec tests de continuité.
+- Étendre la hiérarchie, le marquage et le transfert ; généraliser au multiniveau la topologie non conforme et la génération des contraintes, actuellement limitées à un niveau triangulaire.
 - Ajouter estimation d’erreur, raffinement local puis éléments d’ordre supérieur ; traiter ensuite l’adaptation `hp`, les orientations et les contraintes entre ordres différents.
 - **Terminé si** des tests de convergence et de continuité sur maillages non conformes passent, et si un exemple adaptatif est reproductible. `hp` exige des critères supplémentaires propres à chaque famille d’éléments.
 
@@ -169,7 +169,7 @@ Ne pas ajouter toutes ces dépendances à J0 : réaliser un prototype ciblé, no
 
 1. Exécuter le protocole de comparaison Q1 préparé avec une installation deal.II, puis élargir à des maillages et formulations plus variés.
 2. Étendre progressivement l’interopérabilité au-delà du sous-ensemble Gmsh actuel et tester les formats avec des outils externes.
-3. Étendre la pile de niveaux au déraffinement sélectif et aux contraintes pour maillages non conformes, avant toute adaptation `hp`.
+3. Étendre la pile de niveaux au déraffinement sélectif et généraliser les contraintes et la topologie non conforme au multiniveau, avant toute adaptation `hp`.
 4. Mesurer les performances et étudier les besoins de solveurs, préconditionneurs et parallélisme avant d’intégrer des backends optionnels.
 
 Voir le [rapport d’avancement](docs/RAPPORT_AVANCEMENT.md) pour le bilan et les validations de l’état courant.
