@@ -16,6 +16,7 @@ pub mod gmsh;
 pub mod grid;
 pub mod integrators;
 pub mod lac;
+mod local_refinement;
 pub mod neumann;
 pub mod neumann3d;
 mod neumann_core;
@@ -25,7 +26,9 @@ pub mod quad;
 pub mod quad_field;
 mod quad_refinement;
 pub mod quadrature;
+mod refinement_history;
 pub mod tetra;
+pub mod tetra_field;
 mod tetra_refinement;
 pub mod vtk;
 

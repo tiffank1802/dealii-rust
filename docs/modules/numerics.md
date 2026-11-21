@@ -50,3 +50,5 @@ Les fichiers amont cités sont des repères fonctionnels représentatifs, pas un
 **Neumann pur anisotrope :** `neumann::solve_diffusion`, `neumann_quad::solve_diffusion` et `neumann3d::solve_diffusion` traitent la diffusion scalaire sans réaction ; le flux conormal est fourni par l’appelant et la compatibilité assemblée est vérifiée par composante.
 
 **Champs Q1 :** `quad_field` fournit interpolation nodale, matrice de masse, projection L² et évaluation en coordonnées physiques sur quadrilatères ; la recherche est linéaire et les correspondances par tolérance sont projetées sur le bord. `quad::interpolate_boundary` traite les valeurs de bord. Voir le README pour les limites de quadrature et de conditionnement.
+
+**Champs P1 tétraédriques :** `tetra_field` fournit interpolation nodale, matrice de masse consistante et projection L² ; `tetra::interpolate_boundary` traite les faces de bord. La recherche et l’évaluation ponctuelle 3D sont disponibles par balayage : la tolérance barycentrique peut conduire à une extrapolation. Voir le README pour la quadrature et le conditionnement.

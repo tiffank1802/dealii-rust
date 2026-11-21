@@ -1,4 +1,4 @@
-//! Read a tagged Gmsh 4.1 ASCII mesh and solve a mixed Poisson problem.
+//! Read a tagged Gmsh 4.1 or 2.2 ASCII mesh and solve a mixed Poisson problem.
 //!
 //! This example expects physical curve 40 on the Dirichlet boundary and
 //! curves 10, 20, 30 on the Neumann boundary, as in the provided fixture.
@@ -17,10 +17,24 @@ fn exact(p: Point2) -> f64 {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let path = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "tests/fixtures/square41.msh".to_string());
-    let imported = gmsh::read(File::open(path)?)?;
+    let mut args = std::env::args().skip(1);
+    let first = args.next();
+    let use_22 = first.as_deref() == Some("--msh22");
+    let path = if use_22 {
+        args.next()
+            .unwrap_or_else(|| "tests/fixtures/square22.msh".to_string())
+    } else {
+        first.unwrap_or_else(|| "tests/fixtures/square41.msh".to_string())
+    };
+    if args.next().is_some() {
+        return Err("usage: poisson_gmsh [--msh22] [path]".into());
+    }
+    let file = File::open(path)?;
+    let imported = if use_22 {
+        gmsh::read_msh22(file)?
+    } else {
+        gmsh::read(file)?
+    };
     let mesh = imported.mesh();
     let left_edges = imported.boundary_edges_with_tag(40);
     if left_edges.is_empty() {

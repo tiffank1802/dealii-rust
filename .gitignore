@@ -18,3 +18,5 @@
 /poisson_3d_refinement.vtk
 /poisson_jacobi.vtk
 /quad_field_projection.vtk
+/tetra_field_projection.vtk
+/poisson_local_refinement.vtk

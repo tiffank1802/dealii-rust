@@ -43,3 +43,5 @@ Les fichiers amont cités sont des repères fonctionnels représentatifs, pas un
 **CG initialisé :** `conjugate_gradient_with_initial_guess` accepte un vecteur initial, contrôle le résidu réel et conserve le critère basé sur `||b||`. Une estimation prolongée doit être adaptée aux valeurs de Dirichlet du système éliminé ; aucun gain en itérations n’est garanti.
 
 **Jacobi :** `JacobiPreconditioner` copie la diagonale CSR et valide sa positivité ; `conjugate_gradient_jacobi` et sa variante avec estimation initiale conservent le contrôle du résidu non préconditionné. Construire le préconditionneur après les contraintes et le reconstruire si la matrice change. La positivité de la diagonale ne prouve pas que la matrice est SPD, et le gain n’est pas garanti. GMRES et autres préconditionneurs restent à faire.
+
+**Mesure CSR :** `stored_entries` et `logical_storage_bytes` exposent le nombre d’entrées stockées et la taille logique des trois tableaux, et non la mémoire réelle ou maximale du processus. Voir [le banc Poisson](../BENCHMARK_POISSON.md).

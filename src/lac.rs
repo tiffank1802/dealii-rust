@@ -81,6 +81,19 @@ impl CsrMatrix {
     pub fn cols(&self) -> usize {
         self.cols
     }
+    /// Number of explicitly stored entries, including stored numerical zeros.
+    pub fn stored_entries(&self) -> usize {
+        self.values.len()
+    }
+    /// Logical bytes occupied by the CSR row pointers, column indices and
+    /// values at their current lengths. Excludes vector capacity, headers,
+    /// allocator overhead, matrix assembly buffers and process peak memory.
+    pub fn logical_storage_bytes(&self) -> u128 {
+        let index_bytes = std::mem::size_of::<usize>() as u128;
+        let value_bytes = std::mem::size_of::<f64>() as u128;
+        (self.row_ptr.len() as u128 + self.col_idx.len() as u128) * index_bytes
+            + self.values.len() as u128 * value_bytes
+    }
     pub fn get(&self, row: usize, col: usize) -> Result<f64> {
         if row >= self.rows || col >= self.cols {
             return Err(error("matrix index out of bounds"));

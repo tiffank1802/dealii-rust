@@ -38,10 +38,12 @@ Les fichiers amont cités sont des repères fonctionnels représentatifs, pas un
 
 **État :** les groupes physiques du sous-ensemble Gmsh importé sont conservés dans `gmsh::ImportedMesh`, pas dans `Mesh2` ; voir le [README](../../README.md#import-gmsh-et-résolution-sur-maillage-étiqueté). Les marqueurs généraux modifiables restent à concevoir.
 
-Le raffinement uniforme `UniformRefinement` conserve les indices des anciens sommets, expose les parents des cellules et arêtes de frontière et permet le prolongement P1. Les marqueurs ne sont pas propagés automatiquement. Pas de raffinement local, déraffinement ou hiérarchie persistante.
+Le raffinement uniforme `UniformRefinement` conserve les indices des anciens sommets, expose les parents des cellules et arêtes de frontière et permet le prolongement P1. Les marqueurs ne sont pas propagés automatiquement. Cet objet ne fournit ni déraffinement ni hiérarchie persistante ; le raffinement local conforme est décrit ci-dessous.
 
 **Quadrilatères :** `quad::QuadMesh` valide cellules convexes orientées et topologie d’arêtes, mais ne détecte pas les intersections et nœuds pendants. `quad::UniformRefinement` raffine globalement en quatre, préserve le champ Q1 et expose les parents de cellules et arêtes. Les marqueurs ne sont pas transférés automatiquement ; les API Gmsh et de raffinement triangulaires ne s’appliquent pas.
 
 **Tétraèdres :** `tetra::TetMesh` valide l’orientation, la non-dégénérescence et les faces partagées ; il fournit faces de bord orientées et normales sortantes. `tetra::UniformRefinement` partage les milieux d’arêtes, crée huit enfants, expose les parents des cellules et faces de bord et prolonge P1 ; les marqueurs ne sont pas propagés automatiquement. Les intersections, l’adaptation locale et l’import Gmsh 3D restent hors périmètre.
 
 **Frontières Q1 :** `QuadMesh::boundary_edge_geometry` expose les arêtes dirigées selon les cellules et les normales sortantes ; les IDs restent propres à chaque maillage.
+
+**Raffinement local triangulaire :** `grid::LocalRefinement` découpe les cellules marquées en quatre et adapte leurs voisines aux arêtes coupées, sans hanging nodes. Relations parentales et transfert P1 sont disponibles pour un niveau. `RefinementHistory` conserve une pile de niveaux et permet le retrait du dernier niveau complet avec restriction nodale par injection ; pas de coarsening sélectif, contraintes affines ou garantie de qualité sur raffinements répétés.

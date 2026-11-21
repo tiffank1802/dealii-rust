@@ -1,16 +1,23 @@
-//! Import a deliberately limited, validated subset of Gmsh MSH 4.1 ASCII.
+//! Import deliberately limited, validated subsets of Gmsh MSH 4.1 and 2.2 ASCII.
 //!
 //! Supported: planar nodes with z=0, non-parametric node blocks, point, line
 //! and linear triangle elements, geometric entities, physical tags and names.
 //! Boundary line elements must correspond to external mesh edges. Partitions,
 //! periodic constraints, fields, binary files, 3D and other element types are
 //! rejected rather than silently ignored. Triangles must be counterclockwise.
+//! [`parse`] and [`read`] support 4.1; [`parse_msh22`] and [`read_msh22`]
+//! support a separate strict 2.2 subset and preserve at most one physical tag
+//! per element. See their documentation for the differences.
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 
 use crate::base::Point2;
 use crate::grid::{BoundaryEdgeId, CellId, Mesh2, VertexId};
 use crate::{error, Error, Result};
+
+#[path = "gmsh22.rs"]
+mod legacy;
+pub use legacy::{parse_msh22, read_msh22};
 
 /// A mesh and physical-group metadata aligned with its vertex, cell and
 /// boundary-edge IDs. IDs must be used with the mesh in this object only.
@@ -37,14 +44,15 @@ impl ImportedMesh {
             .copied()
             .ok_or_else(|| error("vertex index out of bounds"))
     }
-    /// Physical tags for a point entity/point element at this vertex.
+    /// Physical tags from a point entity (4.1) or point element at this vertex.
     pub fn vertex_physical_tags(&self, id: VertexId) -> Result<&[u64]> {
         self.vertex_groups
             .get(id.0)
             .map(Vec::as_slice)
             .ok_or_else(|| error("vertex index out of bounds"))
     }
-    /// All physical tags of the surface entity that owns the triangle.
+    /// Physical tags of the triangle: its entity groups in 4.1, or its
+    /// element physical tag in the supported 2.2 subset.
     pub fn cell_physical_tags(&self, id: CellId) -> Result<&[u64]> {
         self.cell_groups
             .get(id.0)

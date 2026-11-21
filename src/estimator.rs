@@ -100,3 +100,49 @@ where
         global_indicator: sum.sqrt(),
     })
 }
+
+/// Select a minimal prefix of cells whose squared indicators reach a fraction
+/// `theta` of their sum (Dörfler/bulk marking). `theta` must be finite in
+/// `[0,1]`; indicators must be finite and nonnegative, in cell order. Cells
+/// are returned in decreasing indicator order, with ties broken by CellId.
+/// Zero `theta` or all-zero indicators produce an empty selection. Scaling by
+/// the largest indicator avoids overflow in squaring; very small contributions
+/// can underflow and comparisons near the threshold depend on rounding. This
+/// only selects cells: refinement, mesh conformity and error reduction are not
+/// guaranteed by the marking rule.
+pub fn mark_bulk(indicators: &[f64], theta: f64) -> Result<Vec<CellId>> {
+    if !theta.is_finite()
+        || !(0.0..=1.0).contains(&theta)
+        || indicators.iter().any(|x| !x.is_finite() || *x < 0.0)
+    {
+        return Err(error("invalid indicators or bulk marking fraction"));
+    }
+    if theta == 0.0 || indicators.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut indices: Vec<_> = (0..indicators.len()).collect();
+    indices.sort_by(|&a, &b| indicators[b].total_cmp(&indicators[a]).then(a.cmp(&b)));
+    let scale = indicators[indices[0]];
+    if scale == 0.0 {
+        return Ok(Vec::new());
+    }
+    let weights: Vec<f64> = indices
+        .iter()
+        .map(|&i| {
+            let r = indicators[i] / scale;
+            r * r
+        })
+        .collect();
+    let total: f64 = weights.iter().sum();
+    let target = theta * total;
+    let mut sum = 0.0;
+    let mut marked = Vec::new();
+    for (&i, &weight) in indices.iter().zip(&weights) {
+        if sum >= target {
+            break;
+        }
+        sum += weight;
+        marked.push(CellId(i));
+    }
+    Ok(marked)
+}
