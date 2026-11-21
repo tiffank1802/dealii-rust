@@ -60,5 +60,29 @@ built by successive `refine` calls or stored in `NonconformingRefinementHistory`
 those at different levels; `AffineConstraints::close` composes the chains before
 `condense` and `reconstruct`. Dirichlet values come from `interpolate_boundary`.
 `examples/poisson_nonconforming_adaptive.rs` demonstrates a two-level
-mark/refine/solve/coarsen cycle. The usual `Mesh2` boundary routines, residual
-estimators and Neumann integration still do not support this seam.
+mark/refine/solve/coarsen cycle and an estimator-driven mark/refine loop. The
+usual `Mesh2` boundary routines and Neumann integration still do not support this
+seam; the conforming `estimator::poisson_dirichlet` accepts only `&Mesh2`.
+
+**Nonconforming residual indicator:**
+`estimator::poisson_dirichlet_nonconforming(mesh, solution, source)` returns
+`ResidualEstimate` with cell indicators aligned to the active `mesh.cells` and a
+root-sum-square global value. It uses the same
+`η_K² = h_K² ∫_K f² + ½ Σ_e h_e ∫_e [∂ₙu_h]²` formula and degree-five quadrature
+as the conforming estimator, under the same assumptions (P1 triangles,
+homogeneous Dirichlet, scalar unit diffusion). An interior edge with two
+incident active cells keeps the conforming two-cell jump term. A split edge with
+one incident active cell is a coarse/fine interface root: its sub-segments are
+walked through `edge_splits`, charging the coarse side
+`0.5·L_master·l_leaf·jump²` and the fine side `0.5·l_leaf²·jump²`; an inconsistent
+fine owner is an `Err`, never a skipped jump. The caller must pass the
+**reconstructed** solution (every `mesh.hanging` rule satisfied to
+`1e-12·(1+|u|)`) and the source closure again, because the assembled load vector
+holds `∫f φᵢ`, not `∫f²`. `estimator::mark_bulk` is reused unchanged; only
+refinement is indicator-driven, since `coarsen` needs structural conditions a
+scalar indicator cannot establish. This is an indicator, not a guaranteed bound.
+The estimator indexes `mesh.vertices` directly and needs no `DofHandler`:
+`DofHandler::from_vertex_count` is count-only, with no `cell_dofs` or
+`boundary_dofs`, and nonconforming DoFs come from the mesh. See
+[RFC-0002](../rfcs/0002-nonconforming-error-estimator/README.md) and
+[ADR-0005](../adr/0005-nonconforming-error-estimator.md).

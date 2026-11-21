@@ -5,8 +5,14 @@
 //! hanging-node constraints composed across both levels, and a final selective
 //! coarsening restores that cell from its four children. This is an additive
 //! example; the one-level `poisson_hanging` example is untouched.
+//!
+//! A separate, independent section then drives the RFC-0002 estimator loop:
+//! solve → estimate → mark the bulk fraction → refine, with a fixed cycle
+//! budget. Only refinement is indicator-driven; see `run_estimator_loop` for
+//! why coarsening cannot be driven by an indicator alone.
 use dealii_rust::{
     base::Point2,
+    estimator::{mark_bulk, poisson_dirichlet_nonconforming},
     grid::{CellId, Mesh2, NonconformingRefinement, VertexId},
     lac::{conjugate_gradient, CgOptions},
 };
@@ -83,9 +89,83 @@ fn solve(mesh: &NonconformingRefinement) -> Result<SolveResult, Box<dyn std::err
     })
 }
 
+/// Bulk-marking fraction: select the largest indicators until their squared
+/// sum reaches `ESTIMATOR_THETA` of the total (RFC-0002 §6). Example value,
+/// not a convergence guarantee.
+const ESTIMATOR_THETA: f64 = 0.3;
+/// Absolute global-indicator target (`tol` in RFC-0002 §6) for this example.
+/// The loop also stops on an empty mark or after `ESTIMATOR_MAX_CYCLES`.
+const ESTIMATOR_TOLERANCE: f64 = 0.05;
+/// Hard cycle budget: local nonconforming refinement need not reduce η
+/// monotonically, so the demonstration is bounded even when `tol` is not met.
+const ESTIMATOR_MAX_CYCLES: usize = 5;
+
+/// Estimator-driven adaptive loop (RFC-0002 §6) on the current mesh.
+///
+/// Every cycle solves from scratch: assemble, add hanging constraints and
+/// Dirichlet values, close, condense, solve the reduced system, then
+/// reconstruct. The estimator requires that reconstructed vector — raw CG
+/// output has unconstrained slave values and is rejected by the hanging-rule
+/// check. The source `f = -4` matches the manufactured solution `u = x² + y²`.
+///
+/// Only refinement responds to η. Naive η-driven coarsening is unsafe:
+/// `NonconformingRefinement::coarsen` restores a parent only when all four
+/// children are marked, none has descendants, and no surviving midpoint
+/// references a removed midpoint as slave or master
+/// (`src/nonconforming_refinement.rs:598-616`). A scalar cell indicator cannot
+/// establish any of those structural conditions, and the history offers only
+/// level-pop `coarsen_last` (`src/nonconforming_refinement.rs:1170-1175`).
+/// The deterministic coarsening demo at the end of `main` stays separate.
+///
+/// The estimator indexes `mesh.vertices` directly and needs no DofHandler;
+/// `DofHandler::from_vertex_count` remains count-only.
+fn run_estimator_loop(parent: &Mesh2) -> Result<(), Box<dyn std::error::Error>> {
+    let mut transition = NonconformingRefinement::new(parent, &[])?;
+    println!(
+        "estimator loop: theta={} tolerance={} max_cycles={}",
+        ESTIMATOR_THETA, ESTIMATOR_TOLERANCE, ESTIMATOR_MAX_CYCLES
+    );
+    let mut stop_reason = "cycle budget exhausted";
+    for cycle in 0..ESTIMATOR_MAX_CYCLES {
+        let solution = solve(&transition)?;
+        let estimate =
+            poisson_dirichlet_nonconforming(transition.mesh(), &solution.values, |_| -4.0)?;
+        let marked = mark_bulk(&estimate.cell_indicators, ESTIMATOR_THETA)?;
+        let cells = transition.mesh().cells.len();
+        let vertices = transition.mesh().vertices.len();
+        println!(
+            "cycle {}: eta={:.6} marked={} cells={} vertices={}",
+            cycle,
+            estimate.global_indicator,
+            marked.len(),
+            cells,
+            vertices
+        );
+        if marked.is_empty() {
+            stop_reason = "empty mark";
+            break;
+        }
+        if estimate.global_indicator <= ESTIMATOR_TOLERANCE {
+            stop_reason = "tolerance reached";
+            break;
+        }
+        transition = transition.refine(&marked)?;
+        // All IDs from this level are stale after the structural change
+        // (ADR-0003 §4). Discard the marks and re-solve from scratch on the new
+        // mesh; no solution transfer is defined for this seam.
+        drop(marked);
+    }
+    println!("estimator loop stopped: {}", stop_reason);
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let n: usize = std::env::args().nth(1).map_or(Ok(4), |s| s.parse())?;
     let parent = Mesh2::unit_square(n)?;
+
+    // Estimator-driven section (RFC-0002 §6), independent of the deterministic
+    // two-level solve and the selective coarsening demonstration below.
+    run_estimator_loop(&parent)?;
 
     // Level 1: a deterministic patch in the lower-left quadrant.
     let patch: Vec<CellId> = parent

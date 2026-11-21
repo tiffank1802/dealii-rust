@@ -60,7 +60,14 @@ restores fully marked sibling groups, one level per call.
 level are emitted by `hanging_constraints` and composed by
 `AffineConstraints::close`. Unbalanced level differences are allowed but can be
 ill-conditioned. See `examples/poisson_nonconforming_adaptive.rs` for a complete
-mark/refine/solve/coarsen flow. The mesh is not convertible to `Mesh2` (its
-boundary detection would treat coarse/fine interfaces as exterior edges);
-Neumann integration, point location, residual estimators, general elliptic
-assembly and geometric detection of arbitrary hanging nodes remain out of scope.
+mark/refine/solve/coarsen flow and an estimator-driven mark/refine loop. The mesh
+is not convertible to `Mesh2` (its boundary detection would treat coarse/fine
+interfaces as exterior edges); Neumann integration, point location, general
+elliptic assembly and geometric detection of arbitrary hanging nodes remain out
+of scope.
+
+The residual indicator for active cells lives in the assembly seam as
+`estimator::poisson_dirichlet_nonconforming`; see [numerics](numerics.md),
+[RFC-0002](../rfcs/0002-nonconforming-error-estimator/README.md) and
+[ADR-0005](../adr/0005-nonconforming-error-estimator.md). No estimator method is
+added to the grid types.

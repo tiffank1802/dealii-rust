@@ -231,7 +231,7 @@ cargo run --example poisson_hanging -- 4
 
 `assemble_poisson` assemble les termes volumiques P1 de `−Δu=f` sur ce maillage ; ajouter explicitement les valeurs de Dirichlet issues de `interpolate_boundary`, fermer les contraintes, condenser, résoudre puis reconstruire. Les parents des cellules et des arêtes de bord ainsi que la prolongation P1 d’un champ parent sont exposés, sans transfert automatique de marqueurs. Si tous les degrés de liberté sont contraints, reconstruire directement avec un vecteur réduit vide. L’exemple utilise un marquage fixe, pas un indicateur adaptatif, et résout une solution quadratique à Dirichlet non homogène.
 
-Ce type est distinct de `Mesh2` : **ne pas reconstruire un `Mesh2` avec sa connectivité non conforme**, car son algorithme de frontière interpréterait les interfaces comme des arêtes extérieures. Le maillage parent doit être conforme et sans recouvrement, ce qui n’est pas entièrement vérifié. Multi-level refinement and selective coarsening are described below; point location, a nonconforming estimator, Neumann integration, general elliptic assembly and geometric detection of arbitrary hanging nodes remain out of scope.
+Ce type est distinct de `Mesh2` : **ne pas reconstruire un `Mesh2` avec sa connectivité non conforme**, car son algorithme de frontière interpréterait les interfaces comme des arêtes extérieures. Le maillage parent doit être conforme et sans recouvrement, ce qui n’est pas entièrement vérifié. Multi-level refinement and selective coarsening are described below; this one-level example uses fixed marking. Point location, Neumann integration, general elliptic assembly and geometric detection of arbitrary hanging nodes remain out of scope. For the residual indicator on active nonconforming cells, see `estimator::poisson_dirichlet_nonconforming` below ([RFC-0002](docs/rfcs/0002-nonconforming-error-estimator/README.md), [ADR-0005](docs/adr/0005-nonconforming-error-estimator.md)).
 
 ### Adaptive multi-level non-conforming Poisson
 
@@ -253,9 +253,15 @@ before `condense` and reconstruction.
 The example marks a deterministic patch from the conforming parent, refines one
 isolated cell a second time, solves `−Δu = −4` with `u = x² + y²` Dirichlet data,
 checks that every hanging-node value is the mean of its masters, and coarsens the
-second-level cell back to its parent. Unbalanced level differences are allowed;
-they can be ill-conditioned. The extension is additive: the existing `new`
-constructor and the P0-P2 examples and tests are unchanged.
+second-level cell back to its parent. It also runs a separate estimator loop
+(RFC-0002 §6): solve, reconstruct, estimate with
+`estimator::poisson_dirichlet_nonconforming`, mark with
+`estimator::mark_bulk`, then `refine` and re-solve within a cycle budget. Only
+refinement is indicator-driven; the deterministic coarsening demonstration stays
+separate, and marked `CellId`s are discarded after each structural change.
+Unbalanced level differences are allowed; they can be ill-conditioned. The
+extension is additive: the existing `new` constructor and the P0-P2 examples and
+tests are unchanged.
 
 ### Raffinement uniforme Q1
 
@@ -283,7 +289,24 @@ cargo run --example poisson_3d_refinement
 η_K² = h_K² ∫_K f² + ½ Σ_(e intérieur de K) h_e ∫_e [∂u_h/∂n]².
 ```
 
-`h_K` est la longueur de la plus grande arête, `h_e` celle de l’arête ; la quadrature triangulaire de degré 5 approxime l’intégrale de `f²`. La contribution de saut de gradient est constante sur chaque arête P1 et répartie à parts égales entre les deux cellules. C’est un **indicateur**, non une borne garantie ni une reproduction de l’estimateur deal.II. Il ne traite pas les résidus de bord Neumann, les coefficients variables ou les maillages non conformes. La décroissance observée sur l’exemple manufacturé ne prouve pas sa fiabilité générale. Le marquage et le raffinement local sont limités aux triangles P1 ; le retour en arrière ne concerne que des niveaux complets. L’estimateur ne s’applique pas au maillage non conforme spécialisé.
+`h_K` est la longueur de la plus grande arête, `h_e` celle de l’arête ; la quadrature triangulaire de degré 5 approxime l’intégrale de `f²`. La contribution de saut de gradient est constante sur chaque arête P1 et répartie à parts égales entre les deux cellules. C’est un **indicateur**, non une borne garantie ni une reproduction de l’estimateur deal.II. Il ne traite pas les résidus de bord Neumann, les coefficients variables ou les maillages non conformes. La décroissance observée sur l’exemple manufacturé ne prouve pas sa fiabilité générale. Le marquage et le raffinement local sont limités aux triangles P1 ; le retour en arrière ne concerne que des niveaux complets. Cette fonction reste réservée à `Mesh2` ; le paragraphe suivant couvre le maillage non conforme.
+
+`estimator::poisson_dirichlet_nonconforming(mesh, solution, source)` provides the
+corresponding indicator for the active cells of `NonconformingMesh`, with the
+same P1-triangle, homogeneous-Dirichlet and unit-diffusion assumptions. Ordinary
+interior edges keep the conforming jump term; a split edge with one incident
+active cell is a coarse/fine interface root whose `edge_splits` leaves are
+charged to the coarse cell (`0.5·L_master·l_leaf·jump²`) and the fine cell
+(`0.5·l_leaf²·jump²`). A missing or duplicated fine owner is an `Err`, never a
+skipped jump. The caller must supply the reconstructed solution (each
+`mesh.hanging` rule satisfied to `1e-12·(1+|u|)`) and the source closure again;
+`estimator::mark_bulk` then selects cells for `refine`. Like the conforming
+function, this is only an indicator, not a guaranteed bound. It indexes
+`mesh.vertices` directly and needs no `DofHandler`:
+`DofHandler::from_vertex_count` is count-only, without `cell_dofs` or
+`boundary_dofs`, and nonconforming DoFs come from the mesh. See
+[RFC-0002](docs/rfcs/0002-nonconforming-error-estimator/README.md) and
+[ADR-0005](docs/adr/0005-nonconforming-error-estimator.md).
 
 ## Contraintes affines algébriques
 
@@ -301,7 +324,7 @@ Le [protocole Q1 deal.II](comparison/dealii_q1/README.md) prépare une comparais
 
 ## Périmètre et validation
 
-- Implémentés : points 2D/3D, triangles et tétraèdres P1, quadrilatères Q1, maillages structurés, mappings affine et bilinéaire, quadratures, assemblage Poisson et diffusion-réaction anisotrope P1 triangulaire et tétraédrique et Q1, Dirichlet, Neumann mixte ou pur normalisé, COO/CSR, CG avec estimation initiale et préconditionnement Jacobi optionnels, réduction algébrique par contraintes affines, export VTK, import de sous-ensembles Gmsh 4.1 et 2.2 ASCII, raffinement uniforme, local triangulaire conforme, multi-level non-conforming refinement with selective coarsening, indicateur résiduel Poisson limité et opérations sur champs P1 et Q1.
+- Implémentés : points 2D/3D, triangles et tétraèdres P1, quadrilatères Q1, maillages structurés, mappings affine et bilinéaire, quadratures, assemblage Poisson et diffusion-réaction anisotrope P1 triangulaire et tétraédrique et Q1, Dirichlet, Neumann mixte ou pur normalisé, COO/CSR, CG avec estimation initiale et préconditionnement Jacobi optionnels, réduction algébrique par contraintes affines, export VTK, import de sous-ensembles Gmsh 4.1 et 2.2 ASCII, raffinement uniforme, local triangulaire conforme, multi-level non-conforming refinement with selective coarsening, indicateurs résiduels Poisson limités (conforme et non conforme P1) et opérations sur champs P1 et Q1.
 - Limités au calcul séquentiel scalaire ; pas encore de raffinement local Q1 ou 3D, de MPI, de Trilinos, autres familles d’éléments que P1/Q1 ou prise en charge complète de Gmsh. Le parcours 3D utilise des tétraèdres P1 ; le solveur Neumann pur anisotrope ne traite pas de réaction. La validation de `Mesh2::new` ne détecte pas les intersections géométriques ni tous les cas non conformes : le maillage fourni doit être conforme.
 - Aucune dépendance Cargo externe. Rust 1.70 est la version minimale **cible**, configurée dans la CI avec la version stable. Les deux configurations ont réussi sur le commit `e2e8734` ; les modifications locales ultérieures ne sont pas couvertes par cette exécution.
 - Les tests couvrent les matrices locales et globales, les coefficients elliptiques et données invalides, le solveur, les normales, les conditions mixtes et Neumann pur 2D/3D, l’import et les marqueurs Gmsh, le raffinement et le transfert P1/Q1 en 2D et P1 en 3D, les indicateurs analytiques, l’interpolation, la projection et l’évaluation ponctuelle, les mappings et patch tests Q1 et tétraédriques, ainsi que la convergence des solutions manufacturées. Le fichier VTK a aussi été lu avec `meshio` lors d’une vérification locale.
