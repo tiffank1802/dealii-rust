@@ -1,7 +1,13 @@
 //! Minimal serial COO/CSR algebra and conjugate gradients.
 use crate::{error, Result};
 
-/// Incremental sparse matrix builder. Duplicate entries are summed on compression.
+/// Incremental sparse matrix builder in COO form.
+///
+/// Frozen policy: duplicate `(row, col)` entries are summed during
+/// [`Self::into_csr`]. Compression sorts by `(row, col)` with a stable sort, so
+/// duplicates are summed in insertion order; floating-point addition is not
+/// associative and that order is part of the contract. Empty rows are preserved.
+/// Out-of-range indices and non-finite values are rejected by [`Self::add`].
 pub struct CooBuilder {
     rows: usize,
     cols: usize,
@@ -15,6 +21,7 @@ impl CooBuilder {
             entries: Vec::new(),
         }
     }
+    /// Add an entry, rejecting out-of-range indices and non-finite values.
     pub fn add(&mut self, row: usize, col: usize, value: f64) -> Result<()> {
         if row >= self.rows || col >= self.cols {
             return Err(error("matrix index out of bounds"));
@@ -25,6 +32,11 @@ impl CooBuilder {
         self.entries.push((row, col, value));
         Ok(())
     }
+    /// Compress the builder into CSR form.
+    ///
+    /// Frozen policy: entries are sorted by `(row, col)` with a stable sort and
+    /// duplicate positions are summed in insertion order. Empty rows are
+    /// preserved. Dimension overflow is reported as an error.
     pub fn into_csr(mut self) -> Result<CsrMatrix> {
         self.entries.sort_by_key(|e| (e.0, e.1));
         let mut merged: Vec<(usize, usize, f64)> = Vec::new();
@@ -132,9 +144,14 @@ impl CsrMatrix {
         }
         Ok(result)
     }
-    /// Symmetric elimination for Dirichlet values. Multiple constraints are
-    /// applied simultaneously; duplicate indices are rejected. Neither input is
-    /// modified on failure.
+    /// Symmetric elimination for Dirichlet values.
+    ///
+    /// Frozen policy: for a symmetric matrix this removes both the row and the
+    /// column of every constrained degree of freedom, shifts the right-hand side
+    /// by the eliminated column contributions (including nonzero prescribed
+    /// values), and stores the prescribed value on the diagonal. The result stays
+    /// symmetric. Multiple constraints are applied simultaneously; duplicate
+    /// indices are rejected. Neither input is modified on failure.
     pub fn with_dirichlet(
         &self,
         rhs: &[f64],
@@ -259,8 +276,12 @@ fn norm(values: &[f64]) -> f64 {
     values.iter().fold(0.0_f64, |acc, x| acc.hypot(*x))
 }
 
-/// Solve Ax=b from zero. A must be symmetric positive definite; breakdown is
-/// detected but does not constitute a complete test of this precondition.
+/// Solve `Ax = b` from zero.
+///
+/// Frozen precondition: `A` must be symmetric positive definite (SPD). SPD is
+/// not verified up front; a non-SPD or singular system is reported through a
+/// breakdown (non-positive or non-finite curvature or inner product) or
+/// non-convergence. Breakdown detection is not a complete SPD test.
 pub fn conjugate_gradient(
     a: &CsrMatrix,
     b: &[f64],
@@ -445,4 +466,231 @@ fn cg_impl(
         "CG did not converge after {} iterations (residual {})",
         options.max_iterations, residual
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn near(a: f64, b: f64) {
+        assert!((a - b).abs() < 1e-12, "{} != {}", a, b);
+    }
+
+    fn near_tol(a: f64, b: f64, tolerance: f64) {
+        assert!((a - b).abs() < tolerance, "{} != {}", a, b);
+    }
+
+    fn dense(values: &[&[f64]]) -> CsrMatrix {
+        let rows = values.len();
+        let cols = values.first().map_or(0, |row| row.len());
+        let mut builder = CooBuilder::new(rows, cols);
+        for (i, row) in values.iter().enumerate() {
+            for (j, &value) in row.iter().enumerate() {
+                builder.add(i, j, value).unwrap();
+            }
+        }
+        builder.into_csr().unwrap()
+    }
+
+    #[test]
+    fn coo_duplicates_are_summed_in_insertion_order_after_a_stable_sort() {
+        // Frozen policy: compression sorts by (row, column) with a stable sort
+        // and sums duplicates in insertion order. Floating-point addition is
+        // not associative, so that order is part of the observable contract.
+        let mut ascending = CooBuilder::new(1, 1);
+        ascending.add(0, 0, 1e16).unwrap();
+        ascending.add(0, 0, 1.0).unwrap();
+        ascending.add(0, 0, -1e16).unwrap();
+        let ascending = ascending.into_csr().unwrap();
+        assert_eq!(ascending.stored_entries(), 1);
+        assert_eq!(ascending.get(0, 0).unwrap(), 0.0);
+
+        let mut descending = CooBuilder::new(1, 1);
+        descending.add(0, 0, -1e16).unwrap();
+        descending.add(0, 0, 1e16).unwrap();
+        descending.add(0, 0, 1.0).unwrap();
+        let descending = descending.into_csr().unwrap();
+        assert_eq!(descending.stored_entries(), 1);
+        assert_eq!(descending.get(0, 0).unwrap(), 1.0);
+
+        // Duplicates that cancel are kept as stored numerical zeros.
+        let mut cancelling = CooBuilder::new(2, 2);
+        cancelling.add(1, 1, 2.0).unwrap();
+        cancelling.add(1, 1, -2.0).unwrap();
+        let cancelling = cancelling.into_csr().unwrap();
+        assert_eq!(cancelling.stored_entries(), 1);
+        assert_eq!(cancelling.get(1, 1).unwrap(), 0.0);
+        assert_eq!(cancelling.mul(&[3.0, 4.0]).unwrap(), vec![0.0, 0.0]);
+    }
+
+    #[test]
+    fn csr_compression_keeps_empty_rows_and_rejects_bad_indices_and_dimensions() {
+        let mut builder = CooBuilder::new(3, 3);
+        builder.add(2, 1, 2.0).unwrap();
+        builder.add(2, 1, 3.0).unwrap();
+        builder.add(2, 2, 4.0).unwrap();
+        let matrix = builder.into_csr().unwrap();
+        assert_eq!(matrix.rows(), 3);
+        assert_eq!(matrix.cols(), 3);
+        assert_eq!(matrix.stored_entries(), 2);
+        // Empty rows own no entries and read back as zero.
+        assert_eq!(matrix.get(0, 0).unwrap(), 0.0);
+        assert_eq!(matrix.get(1, 1).unwrap(), 0.0);
+        assert_eq!(matrix.mul(&[1.0, 1.0, 1.0]).unwrap(), vec![0.0, 0.0, 9.0]);
+        assert!(matrix.get(3, 0).is_err());
+        assert!(matrix.get(0, 3).is_err());
+        assert!(matrix.mul(&[1.0, 1.0]).is_err());
+        assert!(matrix.mul(&[1.0, 1.0, f64::NAN]).is_err());
+
+        let mut builder = CooBuilder::new(3, 3);
+        assert!(builder.add(3, 0, 1.0).is_err());
+        assert!(builder.add(0, 3, 1.0).is_err());
+        assert!(builder.add(0, 0, f64::INFINITY).is_err());
+        assert!(builder.add(0, 0, f64::NAN).is_err());
+
+        assert!(matrix.with_dirichlet(&[1.0, 2.0], &[]).is_err());
+        let mut rectangular = CooBuilder::new(3, 2);
+        rectangular.add(0, 0, 1.0).unwrap();
+        let rectangular = rectangular.into_csr().unwrap();
+        assert!(rectangular.with_dirichlet(&[1.0, 2.0, 3.0], &[]).is_err());
+        assert!(CooBuilder::new(usize::MAX, 0).into_csr().is_err());
+    }
+
+    #[test]
+    fn dirichlet_elimination_is_symmetric_and_keeps_nonzero_prescribed_values() {
+        // Frozen policy: for symmetric `a`, `with_dirichlet` zeroes both the row
+        // and the column of every constrained DoF, shifts the right-hand side by
+        // `a[:, J] g` and stores `g` at the constrained entries. The result
+        // stays symmetric and the prescribed values survive in the solution.
+        let a = dense(&[&[4.0, 1.0, 0.0], &[1.0, 3.0, 1.0], &[0.0, 1.0, 2.0]]);
+        let rhs = [1.0, 2.0, 3.0];
+        let (reduced, shifted) = a.with_dirichlet(&rhs, &[(0, 2.5), (2, -1.5)]).unwrap();
+        assert_eq!(rhs, [1.0, 2.0, 3.0]);
+        assert_eq!(reduced.rows(), 3);
+        assert_eq!(reduced.cols(), 3);
+        assert_eq!(reduced.stored_entries(), 3);
+        for i in 0..3 {
+            for j in 0..3 {
+                near(reduced.get(i, j).unwrap(), reduced.get(j, i).unwrap());
+            }
+        }
+        near(reduced.get(0, 0).unwrap(), 1.0);
+        near(reduced.get(1, 1).unwrap(), 3.0);
+        near(reduced.get(2, 2).unwrap(), 1.0);
+        for &(i, j) in [(0, 1), (1, 0), (0, 2), (2, 0), (1, 2), (2, 1)].iter() {
+            near(reduced.get(i, j).unwrap(), 0.0);
+        }
+        // b[1] = 2 - a[1][0] * 2.5 - a[1][2] * (-1.5) = 2 - 2.5 + 1.5.
+        near(shifted[0], 2.5);
+        near(shifted[1], 1.0);
+        near(shifted[2], -1.5);
+
+        let (x, _) = conjugate_gradient(&reduced, &shifted, CgOptions::default()).unwrap();
+        near_tol(x[0], 2.5, 1e-9);
+        near_tol(x[2], -1.5, 1e-9);
+        near_tol(3.0 * x[1], 1.0, 1e-9);
+        // The interior equation of the original system still holds.
+        near_tol(1.0 * x[0] + 3.0 * x[1] + 1.0 * x[2], rhs[1], 1e-9);
+
+        assert!(a.with_dirichlet(&rhs, &[(0, 1.0), (0, 2.0)]).is_err());
+        assert!(a.with_dirichlet(&rhs, &[(3, 1.0)]).is_err());
+        assert!(a.with_dirichlet(&rhs, &[(0, f64::NAN)]).is_err());
+        assert!(a.with_dirichlet(&[1.0, 2.0, f64::NAN], &[]).is_err());
+    }
+
+    #[test]
+    fn cg_requires_spd_input_and_reports_dimension_mismatch_and_nonconvergence() {
+        // Frozen policy: `a` must be symmetric positive definite. The check is
+        // not performed up front; breakdown is reported once it shows up as a
+        // non-positive curvature or a non-finite inner product.
+        let spd = dense(&[&[2.0, -1.0], &[-1.0, 2.0]]);
+        let (x, report) = conjugate_gradient(&spd, &[1.0, 3.0], CgOptions::default()).unwrap();
+        near_tol(x[0], 5.0 / 3.0, 1e-12);
+        near_tol(x[1], 7.0 / 3.0, 1e-12);
+        assert!(report.iterations >= 1 && report.iterations <= 2);
+        assert!(report.residual_norm <= 1e-9);
+
+        let a = dense(&[&[1.0, 0.0], &[0.0, 2.0]]);
+        let mismatch = conjugate_gradient(&a, &[1.0], CgOptions::default()).unwrap_err();
+        assert!(mismatch.0.contains("dimension mismatch"));
+        let mut rectangular = CooBuilder::new(2, 3);
+        rectangular.add(0, 0, 1.0).unwrap();
+        let rectangular = rectangular.into_csr().unwrap();
+        assert!(conjugate_gradient(&rectangular, &[1.0, 1.0], CgOptions::default()).is_err());
+
+        let stalled = CgOptions {
+            max_iterations: 0,
+            ..CgOptions::default()
+        };
+        let stalled = conjugate_gradient(&a, &[1.0, 2.0], stalled).unwrap_err();
+        assert!(stalled.0.contains("did not converge"));
+
+        // Not SPD: the negative diagonal yields a non-positive curvature.
+        let indefinite = dense(&[&[-1.0]]);
+        let breakdown = conjugate_gradient(&indefinite, &[1.0], CgOptions::default()).unwrap_err();
+        assert!(breakdown.0.contains("breakdown"));
+    }
+
+    #[test]
+    fn cg_initial_guess_uses_the_rhs_threshold_and_stops_at_zero_iterations() {
+        let a = dense(&[&[2.0, 0.0], &[0.0, 3.0]]);
+        let b = [2.0, 6.0];
+        let guess = [1.0, 2.0];
+        let no_budget = CgOptions {
+            max_iterations: 0,
+            ..CgOptions::default()
+        };
+        let (x, report) = conjugate_gradient_with_initial_guess(&a, &b, &guess, no_budget).unwrap();
+        assert_eq!(x, guess);
+        assert_eq!(guess, [1.0, 2.0]);
+        assert_eq!(report.iterations, 0);
+        assert_eq!(report.residual_norm, 0.0);
+
+        // The threshold is relative to ||b||, not to the initial residual.
+        let loose = CgOptions {
+            max_iterations: 0,
+            relative_tolerance: 0.01,
+            absolute_tolerance: 0.0,
+        };
+        let one = dense(&[&[1.0]]);
+        let (_, report) =
+            conjugate_gradient_with_initial_guess(&one, &[1.0], &[0.995], loose).unwrap();
+        assert_eq!(report.iterations, 0);
+        near_tol(report.residual_norm, 0.005, 1e-15);
+
+        // A non-zero guess with a zero right-hand side must still be solved.
+        assert!(conjugate_gradient_with_initial_guess(&a, &[0.0, 0.0], &guess, no_budget).is_err());
+        assert!(conjugate_gradient_with_initial_guess(&a, &b, &[1.0], no_budget).is_err());
+        assert!(
+            conjugate_gradient_with_initial_guess(&a, &b, &[f64::NAN, 0.0], no_budget).is_err()
+        );
+    }
+
+    #[test]
+    fn cg_jacobi_reports_dimension_mismatch_nonconvergence_and_breakdown() {
+        let a = dense(&[&[1.0, 0.0], &[0.0, 2.0]]);
+        let jacobi = JacobiPreconditioner::new(&a).unwrap();
+
+        assert!(conjugate_gradient_jacobi(&a, &[1.0], &jacobi, CgOptions::default()).is_err());
+
+        let wrong = JacobiPreconditioner::new(&dense(&[&[1.0]])).unwrap();
+        assert!(conjugate_gradient_jacobi(&a, &[1.0, 2.0], &wrong, CgOptions::default()).is_err());
+
+        let stalled = CgOptions {
+            max_iterations: 0,
+            ..CgOptions::default()
+        };
+        assert!(conjugate_gradient_jacobi(&a, &[1.0, 2.0], &jacobi, stalled).is_err());
+
+        let indefinite = dense(&[&[1.0, 2.0], &[2.0, 1.0]]);
+        let indefinite_jacobi = JacobiPreconditioner::new(&indefinite).unwrap();
+        let breakdown = conjugate_gradient_jacobi(
+            &indefinite,
+            &[1.0, -1.0],
+            &indefinite_jacobi,
+            CgOptions::default(),
+        )
+        .unwrap_err();
+        assert!(breakdown.0.contains("breakdown"));
+    }
 }

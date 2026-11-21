@@ -1,6 +1,6 @@
 # Comparaison ciblée avec deal.II : Q1 sur un carré
 
-**État : protocole préparé, pas une comparaison deal.II exécutée dans cet environnement.** deal.II et CMake ne sont pas installés ici ; `reference.cc` et sa compilation restent à valider avec une installation réelle. `analytic_smoke.txt` contient des valeurs analytiques, **pas une sortie de deal.II**.
+**État : comparaison deal.II exécutée et validée.** deal.II (commit `1d230ad0be5ab2a3913cf4de8187301430721ed5`, 9.9.0-pre), CMake 4.5.1, AppleClang 21.0.0.21000101, rustc 1.97.1. Écarts maximaux absolus : rigidité `4.441e-16`, charge `1.388e-16`, projection `7.772e-16`, erreur L² `5.551e-17` — tous inférieurs au seuil `1e-10`. Rapport de provenance : `.cache/dealii_q1_run.md`. `analytic_smoke.txt` contient des valeurs analytiques, **pas une sortie de deal.II**.
 
 Le cas compare sur `[0,1]²` avec un seul quadrilatère affine Q1 :
 

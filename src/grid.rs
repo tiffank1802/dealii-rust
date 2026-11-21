@@ -7,13 +7,32 @@ pub use crate::refinement_history::RefinementHistory;
 use crate::{error, Result};
 use std::collections::{BTreeMap, BTreeSet};
 
-/// Index into a mesh's vertices. IDs are meaningful only for that mesh.
+/// Index into a mesh's vertices.
+///
+/// Typed IDs are index-based. A `VertexId` is valid only for the [`Mesh2`]
+/// instance it came from: refinement, renumbering, or any other structural
+/// change of that mesh invalidates it, and no automatic remapping is provided.
+/// Persistent or path-based identifiers are out of scope.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct VertexId(pub usize);
-/// Index into a mesh's cells. IDs are meaningful only for that mesh.
+/// Index into a mesh's cells.
+///
+/// Typed IDs are index-based. A `CellId` is valid only for the [`Mesh2`]
+/// instance it came from: refinement, renumbering, or any other structural
+/// change of that mesh invalidates it, and no automatic remapping is provided.
+/// In particular, after [`UniformRefinement`] the same numeric index addresses
+/// a (different) child cell of the original mesh. Persistent or path-based
+/// identifiers are out of scope.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CellId(pub usize);
 /// Index into the boundary edges of a particular mesh.
+///
+/// Typed IDs are index-based. A `BoundaryEdgeId` is valid only for the
+/// [`Mesh2`] instance it came from: refinement, renumbering, or any other
+/// structural change of that mesh invalidates it, and no automatic remapping is
+/// provided. In particular, after [`UniformRefinement`] the same numeric index
+/// addresses a (different, half-length) boundary edge. Persistent or path-based
+/// identifiers are out of scope.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BoundaryEdgeId(pub usize);
 
@@ -186,6 +205,10 @@ impl Mesh2 {
     pub fn boundary_vertices(&self) -> &[VertexId] {
         &self.boundary_vertices
     }
+    /// Return the three vertex coordinates of `id`.
+    ///
+    /// The id must be valid for this mesh; out-of-bounds ids are rejected.
+    /// Like all typed IDs, `id` is invalidated by refinement or renumbering.
     pub fn cell_points(&self, id: CellId) -> Result<[Point2; 3]> {
         let cell = self
             .cells
@@ -317,5 +340,94 @@ impl UniformRefinement {
             values.push(value);
         }
         Ok(values)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::base::Point2;
+
+    /// ADR-0003 §4: after uniform refinement the same numeric cell index
+    /// addresses a different (child) cell, not the original.
+    #[test]
+    fn typed_cell_id_is_invalidated_by_uniform_refinement() {
+        let coarse = Mesh2::unit_square(1).unwrap();
+        let old = CellId(0);
+        let old_points = coarse.cell_points(old).unwrap();
+
+        let refinement = UniformRefinement::new(&coarse).unwrap();
+        let fine = refinement.mesh();
+
+        // The old numeric index still addresses a cell in the refined mesh...
+        assert!(fine.cell_points(old).is_ok());
+        // ...but that cell is a child of the original, hence a different cell.
+        let new_points = fine.cell_points(old).unwrap();
+        assert_ne!(new_points, old_points);
+        assert_eq!(refinement.parent_cell(old).unwrap(), CellId(0));
+    }
+
+    /// ADR-0003 §4: boundary-edge ids are likewise not reusable across meshes.
+    #[test]
+    fn typed_boundary_edge_id_is_invalidated_by_uniform_refinement() {
+        let coarse = Mesh2::unit_square(1).unwrap();
+        let old = BoundaryEdgeId(0);
+        let old_geom = coarse.boundary_edge_geometry(old).unwrap();
+
+        let refinement = UniformRefinement::new(&coarse).unwrap();
+        let fine = refinement.mesh();
+
+        assert!(fine.boundary_edge_geometry(old).is_ok());
+        let new_geom = fine.boundary_edge_geometry(old).unwrap();
+        // The refined edge is half the length of its parent, so it is a
+        // different edge even though the numeric index coincides.
+        assert!((new_geom.length - old_geom.length).abs() > 1e-12);
+    }
+
+    /// Operations taking ids validate bounds and return `Result` errors.
+    #[test]
+    fn cell_points_rejects_out_of_bounds_id() {
+        let mesh = Mesh2::unit_square(1).unwrap();
+        let n = mesh.cells().len();
+        assert!(mesh.cell_points(CellId(n)).is_err());
+        assert!(mesh.cell_points(CellId(usize::MAX)).is_err());
+    }
+
+    #[test]
+    fn boundary_edge_geometry_rejects_out_of_bounds_id() {
+        let mesh = Mesh2::unit_square(1).unwrap();
+        let n = mesh.boundary_edges().len();
+        assert!(mesh.boundary_edge_geometry(BoundaryEdgeId(n)).is_err());
+        assert!(mesh
+            .boundary_edge_geometry(BoundaryEdgeId(usize::MAX))
+            .is_err());
+    }
+
+    #[test]
+    fn mesh_construction_rejects_out_of_bounds_vertex_id() {
+        let p0 = Point2::new(0.0, 0.0).unwrap();
+        let p1 = Point2::new(1.0, 0.0).unwrap();
+        let p2 = Point2::new(0.0, 1.0).unwrap();
+        let err = Mesh2::new(
+            vec![p0, p1, p2],
+            vec![[VertexId(0), VertexId(1), VertexId(99)]],
+        );
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn uniform_refinement_helpers_reject_out_of_bounds_ids() {
+        let coarse = Mesh2::unit_square(1).unwrap();
+        let refinement = UniformRefinement::new(&coarse).unwrap();
+        let fine_cells = refinement.mesh().cells().len();
+        let coarse_cells = coarse.cells().len();
+
+        assert!(refinement.parent_cell(CellId(fine_cells)).is_err());
+        assert!(refinement.children(CellId(coarse_cells)).is_err());
+
+        let fine_edges = refinement.mesh().boundary_edges().len();
+        assert!(refinement
+            .parent_boundary_edge(BoundaryEdgeId(fine_edges))
+            .is_err());
     }
 }

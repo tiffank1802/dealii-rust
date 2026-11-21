@@ -3,6 +3,12 @@
 //! This module implements `x = C y + g` and the reduced equations
 //! `Cᵀ A C y = Cᵀ(b − A g)`. It does not discover hanging nodes or change
 //! mesh topology; the caller supplies the complete set of relations.
+//!
+//! Frozen contract: constraints are expressed as `x = C y + g`; [`AffineConstraints::close`]
+//! develops dependency chains iteratively (without recursion) and detects cycles;
+//! [`ClosedConstraints::condense`] assembles the reduced system and
+//! [`ClosedConstraints::reconstruct`] recovers `x`. A fully constrained system is
+//! 0×0 and reconstructs from an empty reduced vector.
 use crate::lac::{CooBuilder, CsrMatrix};
 use crate::{error, Result};
 use std::collections::{BTreeMap, BTreeSet};
@@ -19,9 +25,11 @@ struct Row {
 }
 
 /// Builder for rules `x[slave] = offset + Σ coefficient * x[master]`.
-/// Each slave may have one rule. Masters may themselves be constrained; call
-/// [`close`](Self::close) to expand dependencies and detect cycles. Indices
-/// refer to the original vector, independent of the finite element mesh.
+///
+/// Frozen contract: each slave may have one rule; masters may themselves be
+/// constrained. [`close`](Self::close) expands dependency chains iteratively
+/// (without recursion) and detects cycles. Indices refer to the original
+/// vector, independent of the finite element mesh.
 #[derive(Debug, Clone)]
 pub struct AffineConstraints {
     rules: Vec<Option<Rule>>,
@@ -62,6 +70,11 @@ impl AffineConstraints {
     /// Resolve all dependencies without recursion. Cycles and nonfinite
     /// arithmetic are errors. Free DoFs are ordered by increasing original
     /// index. Expressions can grow substantially when many rules are chained.
+    ///
+    /// Frozen policy: dependency chains are developed iteratively (no
+    /// recursion) using topological order; any cycle, including a nonzero
+    /// self-dependency, is reported as an error. A zero-coefficient
+    /// self-dependency is ignored.
     pub fn close(self) -> Result<ClosedConstraints> {
         let n = self.rules.len();
         let free_dofs: Vec<_> = (0..n).filter(|&i| self.rules[i].is_none()).collect();
@@ -218,5 +231,99 @@ impl ClosedConstraints {
             }
         }
         Ok((builder.into_csr()?, reduced_rhs))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lac::{conjugate_gradient, CgOptions, CooBuilder, CsrMatrix};
+
+    fn near(a: f64, b: f64) {
+        assert!((a - b).abs() < 1e-9, "{} != {}", a, b);
+    }
+
+    fn identity(size: usize) -> CsrMatrix {
+        let mut builder = CooBuilder::new(size, size);
+        for i in 0..size {
+            builder.add(i, i, 1.0).unwrap();
+        }
+        builder.into_csr().unwrap()
+    }
+
+    #[test]
+    fn close_develops_deep_dependency_chains_without_recursion() {
+        let n = 5_000;
+        let mut constraints = AffineConstraints::new(n);
+        for i in 1..n {
+            constraints.add(i, 1.0, &[(i - 1, 1.0)]).unwrap();
+        }
+        let closed = constraints.close().unwrap();
+        assert_eq!(closed.free_dofs(), &[0]);
+        let values = closed.reconstruct(&[2.0]).unwrap();
+        near(values[n - 1], n as f64 + 1.0);
+    }
+
+    #[test]
+    fn close_detects_direct_and_indirect_cycles() {
+        let mut constraints = AffineConstraints::new(3);
+        constraints.add(0, 0.0, &[(1, 1.0)]).unwrap();
+        constraints.add(1, 0.0, &[(2, 1.0)]).unwrap();
+        constraints.add(2, 0.0, &[(0, 1.0)]).unwrap();
+        assert!(constraints.close().is_err());
+
+        let mut self_loop = AffineConstraints::new(1);
+        self_loop.add(0, 0.0, &[(0, 1.0)]).unwrap();
+        assert!(self_loop.close().is_err());
+    }
+
+    #[test]
+    fn condense_and_reconstruct_round_trip_satisfies_affine_relation() {
+        let mut constraints = AffineConstraints::new(5);
+        constraints.add(2, 3.0, &[(1, 0.5)]).unwrap();
+        constraints.add(1, 2.0, &[(0, 2.0)]).unwrap();
+        constraints
+            .add(4, -1.0, &[(2, 1.0), (1, -1.0), (3, 3.0)])
+            .unwrap();
+        let closed = constraints.close().unwrap();
+        assert_eq!(closed.free_dofs(), &[0, 3]);
+
+        let reduced = [4.0, 5.0];
+        let original = closed.reconstruct(&reduced).unwrap();
+        assert_eq!(original, vec![4.0, 10.0, 8.0, 5.0, 12.0]);
+
+        let matrix = identity(5);
+        let (reduced_matrix, reduced_rhs) = closed.condense(&matrix, &original).unwrap();
+        let (solution, _) =
+            conjugate_gradient(&reduced_matrix, &reduced_rhs, CgOptions::default()).unwrap();
+        let reconstructed = closed.reconstruct(&solution).unwrap();
+        for (value, expected) in reconstructed.iter().zip(&original) {
+            near(*value, *expected);
+        }
+    }
+
+    #[test]
+    fn fully_constrained_system_reconstructs_from_empty_reduced_vector() {
+        let mut constraints = AffineConstraints::new(3);
+        constraints.add(0, 3.0, &[]).unwrap();
+        constraints.add(1, 1.0, &[(0, 2.0)]).unwrap();
+        constraints.add(2, -1.0, &[(1, 0.5)]).unwrap();
+        let closed = constraints.close().unwrap();
+        assert!(closed.free_dofs().is_empty());
+        assert_eq!(closed.reconstruct(&[]).unwrap(), vec![3.0, 7.0, 2.5]);
+
+        let matrix = identity(3);
+        let (reduced_matrix, reduced_rhs) = closed.condense(&matrix, &[1.0, 2.0, 3.0]).unwrap();
+        assert_eq!(reduced_matrix.rows(), 0);
+        assert_eq!(reduced_matrix.cols(), 0);
+        assert!(reduced_rhs.is_empty());
+    }
+
+    #[test]
+    fn zero_dimensional_constraints_reconstruct_empty() {
+        let closed = AffineConstraints::new(0).close().unwrap();
+        assert!(closed.reconstruct(&[]).unwrap().is_empty());
+        let matrix = CooBuilder::new(0, 0).into_csr().unwrap();
+        assert!(closed.condense(&matrix, &[]).unwrap().1.is_empty());
     }
 }

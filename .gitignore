@@ -19,4 +19,5 @@
 /poisson_jacobi.vtk
 /quad_field_projection.vtk
 /tetra_field_projection.vtk
+/comparison/dealii_q1/build/
 /poisson_local_refinement.vtk
