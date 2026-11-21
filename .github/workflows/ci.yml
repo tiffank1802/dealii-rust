@@ -1,0 +1,56 @@
+name: Rust
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust: ["1.70.0", stable]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+      - run: cargo test --all-targets
+      - run: cargo test --doc
+      - run: cargo doc --no-deps
+      - run: cargo run --example poisson_2d -- 8
+      - run: cargo run --example poisson_jacobi -- 8
+      - run: cargo run --example benchmark_poisson -- 8 2
+      - run: cargo run --example affine_constraints
+      - run: cargo run --example compare_q1_reference -- comparison/dealii_q1/analytic_smoke.txt
+      - run: cargo run --example poisson_q1 -- 8
+      - run: cargo run --example poisson_q1_mixed -- 8
+      - run: cargo run --example poisson_q1_neumann -- 8
+      - run: cargo run --example poisson_3d -- 4
+      - run: cargo run --example poisson_3d_mixed -- 4
+      - run: cargo run --example poisson_3d_neumann -- 4
+      - run: cargo run --example poisson_mixed -- 8
+      - run: cargo run --example poisson_neumann -- 8
+      - run: cargo run --example poisson_gmsh
+      - run: cargo run --example poisson_gmsh -- --msh22 tests/fixtures/meshio_square22.msh
+      - run: cargo run --example poisson_refinement
+      - run: cargo run --example poisson_local_refinement
+      - run: cargo run --example poisson_hanging -- 4
+      - run: cargo run --example poisson_q1_refinement
+      - run: cargo run --example poisson_3d_refinement
+      - run: cargo run --example field_tools
+      - run: cargo run --example quad_field_tools -- 8
+      - run: cargo run --example tetra_field_tools -- 4
+      - run: cargo run --example elliptic_mixed -- 8
+      - run: cargo run --example elliptic_q1_mixed -- 8
+      - run: cargo run --example elliptic_3d_mixed -- 4
+      - run: cargo run --example elliptic_3d_neumann -- 4
+  style:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets
