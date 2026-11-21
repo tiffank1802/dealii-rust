@@ -1,0 +1,54 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "opencode/tidepool-alpha-free",
+  "agents": {
+    "carter-maestro": {
+      "model": "opencode/tidepool-alpha-free"
+    },
+    "carter-maestro-local": {
+      "model": "opencode/tidepool-alpha-free"
+    },
+    "carter-architect": {
+      "model": "opencode/tidepool-alpha-free"
+    },
+    "carter-architect-local": {
+      "model": "opencode/tidepool-alpha-free"
+    },
+    "carter-engineer": {
+      "model": "opencode/tidepool-alpha-free"
+    },
+    "carter-engineer-local": {
+      "model": "opencode/tidepool-alpha-free"
+    },
+    "carter-devops": {
+      "model": "opencode/tidepool-alpha-free"
+    },
+    "carter-devops-local": {
+      "model": "opencode/tidepool-alpha-free"
+    },
+    "carter-pm": {
+      "model": "opencode/tidepool-alpha-free"
+    },
+    "carter-pm-local": {
+      "model": "opencode/tidepool-alpha-free"
+    },
+    "carter-learner": {
+      "model": "opencode/tidepool-alpha-free"
+    },
+    "carter-learner-local": {
+      "model": "opencode/tidepool-alpha-free"
+    },
+    "carter-narrator": {
+      "model": "opencode/tidepool-alpha-free"
+    },
+    "carter-narrator-local": {
+      "model": "opencode/tidepool-alpha-free"
+    },
+    "carter-security": {
+      "model": "opencode/tidepool-alpha-free"
+    },
+    "carter-security-local": {
+      "model": "opencode/tidepool-alpha-free"
+    }
+  }
+}
